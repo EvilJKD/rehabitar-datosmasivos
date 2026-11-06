@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Módulo ETL P1 - Nomenclátor Geográfico Básico de España (NGBE - IGN)
+Módulo ETL P1 - Nomenclátor Geográfico Básico de España (NGBE / WFS IGN)
 Responsable: Desarrollador P1
 
 Objetivo:
-Extraer entidades municipales de la Sierra Norte de la Comunidad de Madrid,
-transformar coordenadas WGS84 a geometrías PostGIS (EPSG:4326) y poblar las tablas
-`municipios` y `metricas_infraestructura`.
+Conectarse directamente a los servicios públicos WFS/REST del Instituto Geográfico
+Nacional (IGN) para extraer el directorio oficial de municipios de la Comunidad de
+Madrid (`codigo_ine` 28xxx, nombre y coordenadas oficiales) e insertarlos en la
+tabla `municipios` con geometría PostGIS `Point(4326)`.
 
 Ejecución aislada:
     python etl/p1_ngbe/etl_ngbe.py
@@ -16,44 +17,45 @@ Ejecución aislada:
 def get_db_connection():
     """
     TODO: Crear y devolver una conexión `psycopg2` a PostgreSQL leyendo las
-    variables de entorno: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER,
-    POSTGRES_PASSWORD y POSTGRES_DB.
+    variables de entorno (POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER,
+    POSTGRES_PASSWORD, POSTGRES_DB).
     """
     pass
 
 
-def load_sample_csv() -> list[dict]:
+def fetch_municipios_ign_api() -> list[dict]:
     """
-    TODO: Leer el fichero local de respaldo `data/raw/ngbe_madrid_sample.csv`
-    utilizando `csv.DictReader` y devolver la lista de diccionarios con los
-    municipios de la Sierra Norte.
-    """
-    pass
-
-
-def extract_ngbe_data() -> list[dict]:
-    """
-    TODO: Intentar conectar en vivo al servicio WFS/NGBE del IGN con un timeout corto.
-    - Si la petición funciona, registrar en el log el éxito de la conexión.
-    - Si falla por red, timeout o código HTTP distinto de 200, imprimir un aviso
-      y hacer fallback automático llamando a `load_sample_csv()`.
+    TODO: Realizar la petición HTTP en vivo al servicio público WFS INSPIRE / NGBE del IGN
+    (por ejemplo `https://www.ign.es/wfs-inspire/unidades-administrativas` o servicio NGBE)
+    filtrando las entidades municipales de la Comunidad de Madrid (provincia 28).
+    Parsear la respuesta GeoJSON / GML devuelta por el IGN para extraer:
+    - `codigo_ine` (5 dígitos, ej. '28078')
+    - `nombre` (ej. 'Madarcos')
+    - `provincia` ('Madrid')
+    - `latitud` y `longitud` (en EPSG:4326)
     """
     pass
 
 
-def run_etl_p1() -> str:
+def ingest_infraestructura_municipio(codigo_ine: str, conn=None) -> dict:
     """
-    TODO: Ejecutar el flujo completo ETL P1 (Extracción -> Transformación -> Carga):
-    1. Obtener los registros llamando a `extract_ngbe_data()`.
-    2. Abrir conexión con `get_db_connection()`.
-    3. Por cada municipio:
-       - Insertar/actualizar (`ON CONFLICT (codigo_ine) DO UPDATE`) en la tabla `municipios`,
-         construyendo el punto PostGIS con `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)`.
-       - Insertar/actualizar en la tabla `metricas_infraestructura` los indicadores de
-         cobertura 5G, fibra, viviendas vacías, precio/m2 y servicios básicos.
-    4. Imprimir el mensaje requerido:
-       `[ETL P1-NGBE] Conectando a IGN / Leyendo CSV... Insertados municipios.`
-    5. Retornar un string resumen con el número de municipios insertados.
+    TODO (Fase 2 - Hidratación Bajo Demanda):
+    Consultar las fuentes públicas de telecomunicaciones / hidrología / red viaria
+    para el `codigo_ine` seleccionado e insertar sus indicadores en la tabla
+    `metricas_infraestructura` (`distancia_carretera_km`, `distancia_recurso_hidrico_km`,
+    `cobertura_fibra_pct`, `cobertura_movil_pct`, `fecha_actualizacion`).
+    """
+    pass
+
+
+def run_etl_p1(seed_codes: list[str] | None = None) -> str:
+    """
+    TODO (Fase 1 - Carga Inicial desde API del IGN):
+    1. Llamar a `fetch_municipios_ign_api()` para obtener en vivo los municipios desde el IGN.
+    2. Insertar los municipios en la tabla `municipios` construyendo el punto PostGIS con
+       `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)` y `hidratado = FALSE`.
+    3. Si hay `seed_codes`, llamar a `ingest_infraestructura_municipio` para esos códigos iniciales.
+    4. Imprimir: `[ETL P1-NGBE] Conectando a API IGN... Insertados municipios.`
     """
     pass
 

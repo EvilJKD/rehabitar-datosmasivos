@@ -1,5 +1,5 @@
 """
-Schemas Pydantic de entrada y salida para validar las respuestas JSON de FastAPI.
+Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la Propuesta.
 """
 
 from pydantic import BaseModel
@@ -7,14 +7,16 @@ from pydantic import BaseModel
 
 class WLCBreakdownSchema(BaseModel):
     """
-    TODO (Responsable P5): Definir los campos del resultado del motor WLC:
-    - indice_wlc: float (0 a 100)
-    - semaforo: str ('VERDE', 'AMBAR', 'ROJO')
+    TODO (Responsable P5 - Sección 4 y 6.4):
+    Desglose pormenorizado de los 5 parámetros de habitabilidad (0 a 100):
+    - indice_wlc: float (Puntuación de Viabilidad Global 0-100, ej. 96.05 en Madarcos)
+    - semaforo: str ('VERDE', 'AMBAR', 'ROJO' o 'PENDIENTE')
     - etiqueta_viabilidad: str
-    - score_demografia: float
-    - score_accesibilidad_sanitaria: float
-    - score_capilaridad_ayudas: float
-    - score_infraestructura: float
+    - score_acceso_carretera: float       (Indicador 1: Acceso por carretera asfaltada)
+    - score_proximidad_sanitaria: float   (Indicador 2: Proximidad a urgencias en minutos CartoCiudad)
+    - score_conectividad_digital: float   (Indicador 3: Fibra óptica + móvil)
+    - score_acceso_hidrico: float         (Indicador 4: Cercanía a recursos hídricos)
+    - score_inercia_demografica: float    (Indicador 5: Variación demográfica a 10 años)
     - pesos_aplicados: dict
     """
     pass
@@ -22,65 +24,65 @@ class WLCBreakdownSchema(BaseModel):
 
 class InfraestructuraSchema(BaseModel):
     """
-    TODO (Responsable P1): Definir campos de infraestructura municipal:
-    - cobertura_5g_pct: float
+    TODO (Responsable P1 - Sección 7.1.3):
+    - distancia_carretera_km: float
+    - distancia_recurso_hidrico_km: float
     - cobertura_fibra_pct: float
-    - viviendas_vacias_pct: float
-    - precio_m2_eur: float
-    - servicios_basicos_score: float
+    - cobertura_movil_pct: float
+    - fecha_actualizacion: date
     """
     pass
 
 
 class RutaSanitariaSchema(BaseModel):
     """
-    TODO (Responsables P3 y P5): Definir campos del centro sanitario más cercano y su ruta:
-    - id_centro: str
-    - nombre: str
-    - tipo_centro: str
-    - municipio_nombre: str
-    - direccion: Optional[str]
-    - telefono: Optional[str]
-    - horario: Optional[str]
+    TODO (Responsables P3 y P5 - Consulta 2 y Sección 7.3):
+    Resultado de la fusión en tiempo real entre KNN PostGIS y API CartoCiudad:
+    - id_centro: str (ej. 'CS-28027')
+    - nombre: str (ej. 'Consultorio Local Buitrago del Lozoya')
+    - tipo: str (ej. 'Centro de Salud / Urgencias')
     - tiene_urgencias: bool
     - latitud: float
     - longitud: float
-    - distancia_euclidea_km: float (calculada en PostGIS KNN)
-    - distancia_carretera_km: float (calculada con CartoCiudad o fallback Haversine)
-    - tiempo_estimado_min: float
-    - fuente_ruta: str
-    - geometria_ruta: List[List[float]] (lista de coordenadas [lat, lon] para Leaflet)
+    - distancia_euclidea_km: float (KNN PostGIS)
+    - distancia_carretera_km: float (En tiempo real desde CartoCiudad, ej. 11.4 km)
+    - tiempo_estimado_min: float (En tiempo real desde CartoCiudad, ej. 12.2 min)
+    - fuente_ruta: str ('API CartoCiudad IGN (Tiempo Real)' o 'Fallback Haversine')
+    - geometria_ruta: List[List[float]]
     """
     pass
 
 
 class ConvocatoriaMunicipioItemSchema(BaseModel):
     """
-    TODO (Responsable P4): Definir campos de una convocatoria BDNS:
-    - codigo_bdns: str
-    - titulo: str
+    TODO (Responsable P4 - Consulta 4 y Sección 7.1.5 / 7.1.6):
+    - codigo_bdns: str (ej. '921084')
+    - descripcion: str
+    - organo_nivel1: str
+    - organo_nivel2: Optional[str]
+    - organo_nivel3: Optional[str]
     - organo_convocante: str
+    - fecha_recepcion: date
+    - inicio_solicitud: Optional[date]
+    - fin_solicitud: Optional[date]
+    - abierta: bool
     - presupuesto_total: float
-    - fecha_inicio: date
-    - fecha_fin: date
-    - categoria: str
-    - poblacion_max_objetivo: int
-    - url_ficha: Optional[str]
-    - activa: bool
-    - importe_estimado_hab: Optional[float]
-    - prioridad_asignacion: Optional[str]
-    - justificacion_cruce: Optional[str]
+    - tipo_beneficiario: Optional[str]
+    - url_bases: Optional[str]
+    - regla_asignacion: Optional[str] ('organo_local' | 'umbral_poblacion' | 'region_completa')
     """
     pass
 
 
 class MunicipioListItemSchema(BaseModel):
     """
-    TODO: Schema resumido para cada elemento de `GET /api/municipios`:
-    - codigo_ine, nombre, comarca, altitud_m, superficie_km2, latitud, longitud
-    - poblacion_actual, variacion_10a_pct, tasa_envejecimiento
-    - distancia_urgencias_km, centro_urgencias_nombre
-    - num_ayudas_activas, importe_total_ayudas_hab
+    TODO: Elemento de `GET /api/municipios` (Consulta 1 y Mapa V1):
+    - codigo_ine, nombre, provincia, comarca, latitud, longitud
+    - hidratado: bool
+    - poblacion_actual: int
+    - variacion_10a_pct: float
+    - cobertura_fibra_pct: float
+    - num_ayudas_abiertas: int
     - wlc: WLCBreakdownSchema
     """
     pass
@@ -88,14 +90,18 @@ class MunicipioListItemSchema(BaseModel):
 
 class MunicipioDetailSchema(BaseModel):
     """
-    TODO: Schema detallado para `GET /api/municipios/{codigo_ine}`:
-    - Datos territoriales base + densidad_hab_km2
-    - Indicadores demográficos C3 (poblacion_2015, poblacion_actual, variacion_10a_pct,
-      variacion_5a_pct, tasa_envejecimiento, ratio_reemplazo_pct, inercia_demografica)
+    TODO: Ficha completa de `GET /api/municipios/{codigo_ine}` (Consultas 1, 2, 3, 4 y Fusión en Memoria):
+    - codigo_ine, nombre, provincia, comarca, latitud, longitud
+    - hidratado: bool
+    - origen_datos: str
+    - poblacion_inicial_10a: int
+    - poblacion_actual: int
+    - variacion_10a_pct: float
+    - preserva_masa_critica: bool
+    - inercia_demografica: str
     - infraestructura: InfraestructuraSchema
     - wlc: WLCBreakdownSchema
     - urgencias_mas_cercana: RutaSanitariaSchema
-    - consultorio_mas_cercano: Optional[RutaSanitariaSchema]
     - convocatorias: List[ConvocatoriaMunicipioItemSchema]
     """
     pass
@@ -103,27 +109,27 @@ class MunicipioDetailSchema(BaseModel):
 
 class DemografiaPuntoAnualSchema(BaseModel):
     """
-    TODO (Responsable P2): Punto anual de la serie histórica (2015-2025):
+    TODO (Responsable P2 - Sección 7.1.2):
     - anio: int
-    - poblacion_total: int
-    - poblacion_mayor_65: int
-    - poblacion_menor_15: int
-    - tasa_envejecimiento: float
-    - ayudas_estimadas_hab_anio: float
+    - poblacion: int
+    - poblacion_mayor_65: Optional[int]
+    - poblacion_menor_15: Optional[int]
+    - tasa_envejecimiento: Optional[float]
     """
     pass
 
 
 class DemografiaSerieResponseSchema(BaseModel):
     """
-    TODO (Responsable P2): Respuesta completa para `GET /api/municipios/{codigo_ine}/demografia`:
+    TODO (Responsable P2 - Consulta 3 y Visualización 2 en Chart.js):
     - codigo_ine: str
     - nombre: str
-    - poblacion_2015: int
-    - poblacion_2025: int
+    - poblacion_inicial_10a: int
+    - poblacion_actual: int
     - variacion_10a_pct: float
-    - tasa_envejecimiento_actual: float
-    - inercia_tendencia: str
+    - cobertura_fibra_pct: float
+    - distancia_urgencias_km: float
+    - num_ayudas_abiertas: int
     - serie_anual: List[DemografiaPuntoAnualSchema]
     """
     pass

@@ -1,6 +1,8 @@
 # =============================================================================
 # RE-HABITAR PoC - Orquestación Completa Docker Compose (LISTO PARA USAR)
-# Comando único de despliegue: docker compose up --build
+# Arquitectura de Ingesta Híbrida:
+#   1) Carga semilla inicial rápida en `etl_runner`
+#   2) Hidratación bajo demanda (Read-Through Cache) desde `app` al clicar en el Frontend
 # =============================================================================
 
 services:
@@ -31,7 +33,7 @@ services:
       - rehabitar_net
 
   # ---------------------------------------------------------------------------
-  # 2. Contenedor Efímero ETL Runner (Ejecuta P1 -> P2 -> P3 -> P4 en vivo)
+  # 2. Contenedor Efímero ETL Runner (Carga Semilla Inicial Ligera y Rápida)
   # ---------------------------------------------------------------------------
   etl_runner:
     build:
@@ -47,6 +49,7 @@ services:
       POSTGRES_PORT: 5432
       DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-rehabitar}:${POSTGRES_PASSWORD:-rehabitar_pwd}@db:5432/${POSTGRES_DB:-rehabitar_db}
       EXTERNAL_API_TIMEOUT: ${EXTERNAL_API_TIMEOUT:-4}
+      INITIAL_SEED_CODES: ${INITIAL_SEED_CODES:-28070,28027}
       PYTHONUNBUFFERED: "1"
     depends_on:
       db:
@@ -56,7 +59,7 @@ services:
       - rehabitar_net
 
   # ---------------------------------------------------------------------------
-  # 3. Aplicación Backend FastAPI + Frontend Web Estático (Puerto 8000)
+  # 3. Aplicación Backend FastAPI + Ingesta Bajo Demanda + Frontend (Puerto 8000)
   # ---------------------------------------------------------------------------
   app:
     build:
@@ -71,6 +74,7 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
       DATABASE_URL_ASYNC: postgresql+asyncpg://${POSTGRES_USER:-rehabitar}:${POSTGRES_PASSWORD:-rehabitar_pwd}@db:5432/${POSTGRES_DB:-rehabitar_db}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-rehabitar}:${POSTGRES_PASSWORD:-rehabitar_pwd}@db:5432/${POSTGRES_DB:-rehabitar_db}
       EXTERNAL_API_TIMEOUT: ${EXTERNAL_API_TIMEOUT:-4}
       WLC_WEIGHT_DEMO: ${WLC_WEIGHT_DEMO:-0.35}
       WLC_WEIGHT_HEALTH: ${WLC_WEIGHT_HEALTH:-0.30}

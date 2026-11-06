@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Módulo ETL P4 - Base de Datos Nacional de Subvenciones (BDNS / SNPSAP)
+Módulo ETL P4 - API OpenAPI de la Base de Datos Nacional de Subvenciones (BDNS / SNPSAP)
 Responsable: Desarrollador P4
 
 Objetivo:
-Extraer convocatorias orientadas al Reto Demográfico y Desarrollo Rural y realizar
-el matching contra la población actual y envejecimiento de cada municipio (< 20.000 hab),
-poblando las tablas `convocatorias` y `convocatoria_municipio`.
+Conectarse directamente a la API REST OpenAPI del portal SNPSAP / BDNS
+(`https://www.infosubvenciones.es/bdnstrans/api/...`) para extraer las convocatorias
+de subvenciones con alcance en la Comunidad de Madrid, almacenarlas en `convocatorias`
+y aplicar las reglas de inferencia territorial en `convocatoria_municipio`.
 
 Ejecución aislada:
     python etl/p4_bdns/etl_bdns.py
@@ -15,43 +16,46 @@ Ejecución aislada:
 
 def get_db_connection():
     """
-    TODO: Crear y devolver una conexión `psycopg2` a PostgreSQL leyendo las
-    variables de entorno de configuración.
+    TODO: Crear y devolver una conexión `psycopg2` a PostgreSQL.
     """
     pass
 
 
-def load_sample_json() -> dict:
+def fetch_bdns_convocatorias_api() -> list[dict]:
     """
-    TODO: Leer y parsear el archivo local `data/raw/bdns_convocatorias_sample.json`
-    con las convocatorias de ejemplo para municipios rurales.
-    """
-    pass
-
-
-def extract_bdns_grants() -> list[dict]:
-    """
-    TODO: Intentar consultar la API de convocatorias de la BDNS (`BDNS_API_URL`).
-    - Si falla o no devuelve JSON directo, activar el fallback automático llamando
-      a `load_sample_json()` y devolviendo la lista `"convocatorias"`.
+    TODO: Realizar petición HTTP GET directamente a la API OpenAPI de la BDNS / SNPSAP
+    filtrando las convocatorias con alcance en la Comunidad de Madrid.
+    Extraer para cada convocatoria los campos de la Sección 7.1.5:
+    - `codigo_bdns`
+    - `descripcion`
+    - `organo_nivel1`, `organo_nivel2`, `organo_nivel3`
+    - `fecha_recepcion`, `inicio_solicitud`, `fin_solicitud`, `abierta`
+    - `presupuesto_total`, `tipo_beneficiario`, `poblacion_max_objetivo`, `url_bases`
     """
     pass
 
 
-def run_etl_p4() -> str:
+def ingest_bdns_for_municipio(codigo_ine: str, conn=None) -> int:
     """
-    TODO: Ejecutar el flujo completo ETL P4:
-    1. Obtener las convocatorias llamando a `extract_bdns_grants()`.
-    2. Insertar/actualizar cada convocatoria en la tabla `convocatorias`.
-    3. Consultar en la base de datos los municipios registrados junto con su última
-       `poblacion_total` y `tasa_envejecimiento` de `demografia_anual`.
-    4. Realizar el matching en `convocatoria_municipio`:
-       - Si la población del municipio es `<= poblacion_max_objetivo` de la convocatoria,
-         calcular `importe_estimado_hab`, asignar `prioridad_asignacion` (`CRÍTICA`, `ALTA`, `MEDIA`)
-         e insertar el vínculo en `convocatoria_municipio`.
-    5. Imprimir el mensaje requerido:
-       `[ETL P4-BDNS] Asignando convocatorias rurales a municipios < 20.000 hab... OK.`
-    6. Retornar un resumen con el número de convocatorias y asignaciones creadas.
+    TODO (Fase 2 - Matching Bajo Demanda para un municipio):
+    1. Consultar en PostgreSQL la población actual de `codigo_ine` (en `demografia_anual`)
+       y las convocatorias de la tabla `convocatorias`.
+    2. Determinar qué convocatorias aplican al municipio y con qué `regla_asignacion`
+       (`'organo_local' | 'umbral_poblacion' | 'region_completa'`).
+    3. Insertar las asignaciones en `convocatoria_municipio (codigo_ine, codigo_bdns, regla_asignacion)`
+       usando `ON CONFLICT (codigo_ine, codigo_bdns) DO UPDATE`.
+    4. Marcar el municipio como hidratado:
+       `UPDATE municipios SET hidratado = TRUE, fecha_hidratacion = CURRENT_TIMESTAMP WHERE codigo_ine = %s;`
+    """
+    pass
+
+
+def run_etl_p4(target_codes: list[str] | None = None) -> str:
+    """
+    TODO (Fase 1 - Carga Inicial desde API BDNS):
+    1. Llamar a `fetch_bdns_convocatorias_api()` e insertar las convocatorias en la tabla `convocatorias`.
+    2. Ejecutar `ingest_bdns_for_municipio` para los municipios semilla en `target_codes`.
+    3. Imprimir: `[ETL P4-BDNS] Asignando convocatorias rurales desde API BDNS... OK.`
     """
     pass
 

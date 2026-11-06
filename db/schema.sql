@@ -1,96 +1,119 @@
 -- =============================================================================
--- RE-HABITAR PoC: Esqueleto del Esquema DDL (PostgreSQL + PostGIS)
+-- RE-HABITAR PoC: Esqueleto del Esquema DDL (PostgreSQL + PostGIS + Citus-Ready)
+-- Alineado con las Secciones 4, 5.2, 6.3, 6.5, 7.1, 7.2, 7.3 y 9 de la Propuesta
 -- =============================================================================
 
--- TODO 0: Habilitar la extensión espacial PostGIS si no existe
+-- TODO 0: Habilitar la extensión espacial PostGIS
 -- CREATE EXTENSION IF NOT EXISTS postgis;
+-- (En despliegue distribuido Citus: CREATE EXTENSION IF NOT EXISTS citus;)
 
 
 -- =============================================================================
--- TODO 1 (Responsable P1): Tabla `municipios` e Índice Espacial GiST
+-- TODO 1 (Responsable P1): Tabla `municipios` (Entidad Maestra - Sección 7.1.1)
+-- Rol en Citus: Reference Table (o Distributed Table líder por `codigo_ine`)
 -- =============================================================================
--- Debe almacenar las entidades municipales de la Sierra Norte de Madrid:
---   - codigo_ine VARCHAR(10) PRIMARY KEY
---   - nombre VARCHAR(120) NOT NULL
---   - comarca VARCHAR(100) DEFAULT 'Sierra Norte'
---   - altitud_m INTEGER NOT NULL
---   - superficie_km2 NUMERIC(8, 2) NOT NULL
---   - latitud DOUBLE PRECISION NOT NULL
---   - longitud DOUBLE PRECISION NOT NULL
---   - geom geometry(Point, 4326) NOT NULL
---   - created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+-- Debe almacenar las entidades municipales de la Comunidad de Madrid:
+--   - codigo_ine VARCHAR(5) PRIMARY KEY                 -- Ej. '28078' (Madarcos)
+--   - nombre VARCHAR(120) NOT NULL                      -- Ej. 'Madarcos'
+--   - provincia VARCHAR(80) NOT NULL DEFAULT 'Madrid'
+--   - comarca VARCHAR(100) NOT NULL DEFAULT 'Sierra Norte'
+--   - latitud DOUBLE PRECISION NOT NULL CHECK (latitud BETWEEN -90 AND 90)
+--   - longitud DOUBLE PRECISION NOT NULL CHECK (longitud BETWEEN -180 AND 180)
+--   - geom geometry(Point, 4326) NOT NULL               -- Punto PostGIS WGS84
+--   - hidratado BOOLEAN NOT NULL DEFAULT FALSE          -- Control de Ingesta Híbrida Materializada
+--   - fecha_hidratacion TIMESTAMP WITH TIME ZONE        -- Fecha de carga bajo demanda en BD
+--   - created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 --
--- Crear también índice espacial GiST sobre la columna `geom`:
---   CREATE INDEX IF NOT EXISTS idx_municipios_geom ON municipios USING GIST (geom);
+-- Índices a crear:
+--   - Índice espacial GiST: CREATE INDEX IF NOT EXISTS idx_municipios_geom ON municipios USING GIST (geom);
+--   - Índice B-Tree de estado: CREATE INDEX IF NOT EXISTS idx_municipios_provincia_hidratado ON municipios (provincia, hidratado);
 
 
 -- =============================================================================
--- TODO 2 (Responsable P2): Tabla `demografia_anual`
+-- TODO 2 (Responsable P2): Tabla `demografia_anual` (Serie Histórica - Sección 7.1.2)
+-- Rol en Citus: Distributed Table (shard key: `codigo_ine`)
 -- =============================================================================
--- Debe almacenar las series históricas anuales del Padrón del INE (2015-2025):
---   - id SERIAL PRIMARY KEY
---   - codigo_ine VARCHAR(10) NOT NULL REFERENCES municipios(codigo_ine) ON DELETE CASCADE
---   - anio INTEGER NOT NULL
---   - poblacion_total INTEGER NOT NULL
---   - poblacion_mayor_65 INTEGER NOT NULL DEFAULT 0
---   - poblacion_menor_15 INTEGER NOT NULL DEFAULT 0
---   - tasa_envejecimiento NUMERIC(5, 2) NOT NULL DEFAULT 0.0
---   - Restricción UNIQUE (codigo_ine, anio)
+-- IMPORTANTE PARA ESCALABILIDAD CITUS:
+-- No usar `id SERIAL PRIMARY KEY`. La clave primaria DEBE ser compuesta `(codigo_ine, anio)`
+-- para incluir la columna de particionamiento `codigo_ine`.
+-- Columnas requeridas:
+--   - codigo_ine VARCHAR(5) NOT NULL REFERENCES municipios(codigo_ine) ON DELETE CASCADE
+--   - anio SMALLINT NOT NULL CHECK (anio BETWEEN 1900 AND 2100)
+--   - poblacion INTEGER NOT NULL CHECK (poblacion >= 0)
+--   - poblacion_mayor_65 INTEGER DEFAULT 0              -- Opcional (Tablas INE 2881/69744 para masa crítica)
+--   - poblacion_menor_15 INTEGER DEFAULT 0
+--   - tasa_envejecimiento NUMERIC(5, 2) DEFAULT 0.00
+--   - PRIMARY KEY (codigo_ine, anio)
+--
+-- Índice a crear para Consulta 3 (variación a 10 años):
+--   - CREATE INDEX IF NOT EXISTS idx_demografia_anio_codigo ON demografia_anual (anio, codigo_ine);
 
 
 -- =============================================================================
--- TODO 3 (Responsable P3): Tabla `centros_sanitarios` e Índice Espacial GiST
+-- TODO 3 (Responsable P1): Tabla `metricas_infraestructura` (Sección 7.1.3)
+-- Rol en Citus: Distributed Table (shard key: `codigo_ine`, co-localizada con `demografia_anual`)
 -- =============================================================================
--- Debe almacenar los centros de salud, consultorios y puntos de urgencias 24h (CAM):
---   - id_centro VARCHAR(40) PRIMARY KEY
---   - nombre VARCHAR(200) NOT NULL
---   - tipo_centro VARCHAR(100) NOT NULL
---   - municipio_nombre VARCHAR(120) NOT NULL
+-- REGLA ESTRICTA DE LA PROPUESTA (Sección 6.3 y 7.3):
+--   "El tiempo de trayecto hacia el punto sanitario NO se almacena en ninguna tabla
+--    para evitar obsolescencia." Por tanto, esta tabla SOLO guarda indicadores físicos
+--   y digitales estáticos consolidados:
+--   - codigo_ine VARCHAR(5) PRIMARY KEY REFERENCES municipios(codigo_ine) ON DELETE CASCADE
+--   - distancia_carretera_km NUMERIC(6, 2) NOT NULL DEFAULT 0.00       -- Indicador 1 WLC (Acceso por carretera asfaltada)
+--   - distancia_recurso_hidrico_km NUMERIC(6, 2) NOT NULL DEFAULT 0.00 -- Indicador 4 WLC (Acceso a recursos hídricos)
+--   - cobertura_fibra_pct NUMERIC(5, 2) NOT NULL DEFAULT 0.00          -- Indicador 3 WLC y Filtro de Consulta 1
+--   - cobertura_movil_pct NUMERIC(5, 2) NOT NULL DEFAULT 0.00          -- Indicador 3 WLC (Conectividad móvil 4G/5G)
+--   - fecha_actualizacion DATE NOT NULL DEFAULT CURRENT_DATE
+--
+-- Índice parcial para acelerar Consulta 1 (municipios con cobertura de fibra):
+--   - CREATE INDEX IF NOT EXISTS idx_infra_cobertura_fibra ON metricas_infraestructura (cobertura_fibra_pct) WHERE cobertura_fibra_pct > 0;
+
+
+-- =============================================================================
+-- TODO 4 (Responsable P3): Tabla `centros_sanitarios` (Sección 7.1.4)
+-- Rol en Citus: Reference Table (replicada en los workers para consultas espaciales KNN)
+-- =============================================================================
+-- Directorio asistencial de la Comunidad de Madrid:
+--   - id_centro VARCHAR(40) PRIMARY KEY                 -- Ej. 'CS-28027'
+--   - nombre VARCHAR(200) NOT NULL                      -- Ej. 'Consultorio Local Buitrago del Lozoya'
+--   - tipo VARCHAR(100) NOT NULL                        -- Ej. 'Centro de Salud / Urgencias', 'Consultorio Local'
+--   - tiene_urgencias BOOLEAN NOT NULL DEFAULT FALSE    -- Discriminador para Consulta 2 e Indicador 2 WLC
+--   - municipio_nombre VARCHAR(120)
 --   - direccion VARCHAR(250)
---   - tiene_urgencias BOOLEAN NOT NULL DEFAULT FALSE
 --   - horario VARCHAR(120)
 --   - telefono VARCHAR(30)
---   - latitud DOUBLE PRECISION NOT NULL
---   - longitud DOUBLE PRECISION NOT NULL
---   - geom geometry(Point, 4326) NOT NULL
+--   - latitud DOUBLE PRECISION NOT NULL CHECK (latitud BETWEEN -90 AND 90)
+--   - longitud DOUBLE PRECISION NOT NULL CHECK (longitud BETWEEN -180 AND 180)
+--   - geom geometry(Point, 4326) NOT NULL               -- Punto PostGIS para operador KNN `<->`
 --
--- Crear índice espacial GiST sobre `geom` para acelerar consultas KNN (`<->`):
---   CREATE INDEX IF NOT EXISTS idx_centros_sanitarios_geom ON centros_sanitarios USING GIST (geom);
+-- Índices espaciales GiST a crear:
+--   - CREATE INDEX IF NOT EXISTS idx_centros_sanitarios_geom ON centros_sanitarios USING GIST (geom);
+--   - CREATE INDEX IF NOT EXISTS idx_centros_urgencias_geom ON centros_sanitarios USING GIST (geom) WHERE tiene_urgencias = TRUE;
 
 
 -- =============================================================================
--- TODO 4 (Responsable P4): Tablas `convocatorias` y `convocatoria_municipio`
+-- TODO 5 (Responsable P4): Tablas `convocatorias` y `convocatoria_municipio` (Sección 7.1.5 y 7.1.6)
 -- =============================================================================
--- 4.1 Tabla `convocatorias` (Catálogo BDNS):
---   - codigo_bdns VARCHAR(30) PRIMARY KEY
---   - titulo TEXT NOT NULL
---   - organo_convocante VARCHAR(200) NOT NULL
---   - presupuesto_total NUMERIC(14, 2) NOT NULL
---   - fecha_inicio DATE NOT NULL
---   - fecha_fin DATE NOT NULL
---   - categoria VARCHAR(80) NOT NULL
---   - poblacion_max_objetivo INTEGER NOT NULL DEFAULT 20000
---   - url_ficha TEXT
---   - activa BOOLEAN NOT NULL DEFAULT TRUE
+-- 5.1 Tabla `convocatorias` (BDNS - Reference Table en Citus):
+--   - codigo_bdns VARCHAR(30) PRIMARY KEY               -- Ej. '921084'
+--   - descripcion TEXT NOT NULL                         -- Título/objeto de la ayuda
+--   - organo_nivel1 VARCHAR(150) NOT NULL               -- Ej. 'COMUNIDAD DE MADRID' o 'ESTADO'
+--   - organo_nivel2 VARCHAR(150)                        -- Ej. 'CONSEJERÍA DE PRESIDENCIA...'
+--   - organo_nivel3 VARCHAR(150)                        -- Ej. 'DIRECCIÓN GENERAL DE REEQUILIBRIO TERRITORIAL'
+--   - organo_convocante TEXT GENERATED ALWAYS AS (COALESCE(organo_nivel3, organo_nivel2, organo_nivel1)) STORED
+--   - fecha_recepcion DATE NOT NULL DEFAULT CURRENT_DATE
+--   - inicio_solicitud DATE
+--   - fin_solicitud DATE
+--   - abierta BOOLEAN NOT NULL DEFAULT TRUE             -- Filtro de Consulta 4
+--   - presupuesto_total NUMERIC(14, 2) NOT NULL DEFAULT 0.00
+--   - tipo_beneficiario VARCHAR(150)
+--   - poblacion_max_objetivo INTEGER DEFAULT 20000      -- Umbral demográfico (ej. 20000 hab)
+--   - url_bases TEXT
 --
--- 4.2 Tabla puente `convocatoria_municipio` (Matching de ayudas con municipios):
---   - id SERIAL PRIMARY KEY
+-- 5.2 Tabla `convocatoria_municipio` (Resultado de asignación - Distributed Table por `codigo_ine` en Citus):
+-- IMPORTANTE PARA CITUS: Clave primaria compuesta `(codigo_ine, codigo_bdns)` con `codigo_ine` primero
+-- para co-localizar los datos en el mismo nodo worker que `demografia_anual` y `metricas_infraestructura`:
+--   - codigo_ine VARCHAR(5) NOT NULL REFERENCES municipios(codigo_ine) ON DELETE CASCADE
 --   - codigo_bdns VARCHAR(30) NOT NULL REFERENCES convocatorias(codigo_bdns) ON DELETE CASCADE
---   - codigo_ine VARCHAR(10) NOT NULL REFERENCES municipios(codigo_ine) ON DELETE CASCADE
---   - importe_estimado_hab NUMERIC(10, 2) NOT NULL DEFAULT 0.0
---   - prioridad_asignacion VARCHAR(30) NOT NULL DEFAULT 'ALTA'
---   - justificacion_cruce TEXT
---   - Restricción UNIQUE (codigo_bdns, codigo_ine)
-
-
--- =============================================================================
--- TODO 5 (Responsables P1 / P5): Tabla `metricas_infraestructura`
--- =============================================================================
--- Debe almacenar los indicadores de conectividad y vivienda de soporte para el motor WLC:
---   - codigo_ine VARCHAR(10) PRIMARY KEY REFERENCES municipios(codigo_ine) ON DELETE CASCADE
---   - cobertura_5g_pct NUMERIC(5, 2) NOT NULL DEFAULT 0.0
---   - cobertura_fibra_pct NUMERIC(5, 2) NOT NULL DEFAULT 0.0
---   - viviendas_vacias_pct NUMERIC(5, 2) NOT NULL DEFAULT 0.0
---   - precio_m2_eur NUMERIC(8, 2) NOT NULL DEFAULT 0.0
---   - servicios_basicos_score NUMERIC(5, 2) NOT NULL DEFAULT 50.0
---   - updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+--   - regla_asignacion VARCHAR(30) NOT NULL CHECK (regla_asignacion IN ('organo_local', 'umbral_poblacion', 'region_completa'))
+--   - fecha_asignacion TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+--   - PRIMARY KEY (codigo_ine, codigo_bdns)

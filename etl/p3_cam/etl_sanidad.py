@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Módulo ETL P3 - Portal de Datos Abiertos de la Comunidad de Madrid (Centros Sanitarios)
+Módulo ETL P3 - API de Datos Abiertos de la Comunidad de Madrid (Centros Sanitarios)
 Responsable: Desarrollador P3
 
 Objetivo:
-Extraer y geocodificar los centros de salud, consultorios locales y puntos de
-urgencias 24h (SAR/PAC/Hospital) del norte de la Comunidad de Madrid y cargarlos
-en la tabla `centros_sanitarios` con geometría PostGIS EPSG:4326.
+Conectarse directamente al Portal de Datos Abiertos de la Comunidad de Madrid
+(API REST CKAN / descarga directa JSON o CSV del catálogo de Centros, Servicios
+y Establecimientos Sanitarios) e insertar los registros geocodificados en la
+tabla `centros_sanitarios` con geometría PostGIS `Point(4326)`.
 
 Ejecución aislada:
     python etl/p3_cam/etl_sanidad.py
@@ -15,42 +16,33 @@ Ejecución aislada:
 
 def get_db_connection():
     """
-    TODO: Crear y devolver una conexión `psycopg2` a PostgreSQL leyendo las
-    variables de entorno de conexión.
+    TODO: Crear y devolver una conexión `psycopg2` a PostgreSQL.
     """
     pass
 
 
-def load_sample_csv() -> list[dict]:
+def fetch_cam_health_centers_api() -> list[dict]:
     """
-    TODO: Leer el archivo local de respaldo `data/raw/centros_salud_cam_sample.csv`
-    con `csv.DictReader` y devolver la lista de centros sanitarios.
-    """
-    pass
-
-
-def extract_cam_health_centers() -> list[dict]:
-    """
-    TODO: Intentar descargar el dataset de centros sanitarios desde el Portal de
-    Datos Abiertos de la Comunidad de Madrid.
-    - Si falla la conexión o el timeout expira, activar el fallback automático
-      llamando a `load_sample_csv()`.
+    TODO: Realizar petición HTTP GET directamente al endpoint del Portal de Datos
+    Abiertos de la Comunidad de Madrid (`CAM_SANIDAD_CSV_URL` / API JSON CKAN).
+    Parsear los registros devueltos por la API pública de la CAM para extraer:
+    - `id_centro`
+    - `nombre`
+    - `tipo` (ej. 'Consultorio Local', 'Centro de Salud', 'Hospital')
+    - `tiene_urgencias` (booleano según si dispone de urgencias / atención continuada SAR/SUAP)
+    - `municipio_nombre`, `direccion`, `horario`, `telefono`
+    - `latitud` y `longitud` (transformando desde UTM ETRS89 EPSG:25830 a WGS84 EPSG:4326 si el recurso viene en UTM)
     """
     pass
 
 
 def run_etl_p3() -> str:
     """
-    TODO: Ejecutar el flujo completo ETL P3:
-    1. Obtener la lista de centros con `extract_cam_health_centers()`.
-    2. Por cada centro sanitario:
-       - Convertir `tiene_urgencias` a booleano (`True`/`False`) y `latitud`/`longitud` a `float`.
-       - Insertar en `centros_sanitarios` construyendo la geometría espacial con
-         `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)` y manejando duplicados con
-         `ON CONFLICT (id_centro) DO UPDATE`.
-    3. Imprimir el mensaje requerido:
-       `[ETL P3-CAM] Geocodificando centros de salud de la CAM... OK.`
-    4. Retornar un resumen con el total de centros geocodificados.
+    TODO: Ejecutar la ingesta desde la API de Datos Abiertos de la CAM:
+    1. Obtener la lista de centros llamando a `fetch_cam_health_centers_api()`.
+    2. Insertar cada centro en `centros_sanitarios` creando la geometría espacial con
+       `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)` y `ON CONFLICT (id_centro) DO UPDATE`.
+    3. Imprimir: `[ETL P3-CAM] Geocodificando centros de salud desde API CAM... OK.`
     """
     pass
 

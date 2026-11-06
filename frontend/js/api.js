@@ -1,6 +1,7 @@
 /**
  * Módulo Conector Cliente (`api.js`)
- * Centraliza todas las llamadas `fetch` asíncronas hacia los endpoints de FastAPI.
+ * Gestiona las peticiones hacia FastAPI, incluyendo la hidratación bajo demanda
+ * cuando el usuario selecciona un municipio en el mapa o selector.
  */
 
 const ReHabitarAPI = (() => {
@@ -8,67 +9,61 @@ const ReHabitarAPI = (() => {
 
     /**
      * TODO: Construir el query string opcional `?w_demo=...&w_health=...&w_grants=...&w_infra=...`
-     * cuando el usuario ajuste los pesos del simulador WLC.
-     * @param {Object|null} weights
-     * @returns {string}
      */
     function buildWeightQuery(weights) {
-        // TODO: Implementar construcción de URLSearchParams
         return "";
     }
 
     /**
-     * TODO: Realizar petición `GET /api/municipios` para obtener el listado de municipios
-     * con su puntuación del índice WLC y color semafórico (`VERDE`, `AMBAR`, `ROJO`).
-     * @param {Object|null} weights
-     * @returns {Promise<Array>}
+     * TODO: Obtener todos los municipios (`GET /api/municipios`), tanto los ya hidratados
+     * (`hidratado: true`) como los pendientes de ingesta bajo demanda (`hidratado: false`).
      */
     async function fetchMunicipios(weights = null) {
-        // TODO: Hacer fetch a `${BASE_URL}/municipios` y retornar el JSON
+        // TODO: Implementar fetch a `${BASE_URL}/municipios`
     }
 
     /**
-     * TODO: Realizar petición `GET /api/municipios/{codigoIne}` para obtener el detalle
-     * del municipio, desglose WLC, ruta KNN + CartoCiudad a urgencias y ayudas BDNS.
-     * @param {string} codigoIne
-     * @param {Object|null} weights
-     * @returns {Promise<Object>}
+     * TODO: Obtener el detalle de un municipio (`GET /api/municipios/{codigoIne}`).
+     * Si el municipio aún no estaba hidratado en PostgreSQL, esta llamada dispara
+     * automáticamente en el backend la ingesta desde INE, BDNS y CartoCiudad, guarda
+     * el registro en la base de datos y devuelve el objeto completo con `origen_datos`.
      */
-    async function fetchMunicipioDetail(codigoIne, weights = null) {
-        // TODO: Hacer fetch a `${BASE_URL}/municipios/${codigoIne}` y retornar el JSON
+    async function fetchMunicipioDetail(codigoIne, weights = null, forceRefresh = false) {
+        // TODO: Implementar fetch a `${BASE_URL}/municipios/${codigoIne}`
     }
 
     /**
-     * TODO: Realizar petición `GET /api/municipios/{codigoIne}/demografia` para obtener
-     * la serie histórica 2015-2025 para el gráfico de Chart.js.
-     * @param {string} codigoIne
-     * @returns {Promise<Object>}
+     * TODO: Forzar explícitamente la re-ingesta en vivo de un municipio (`POST /api/municipios/{codigoIne}/ingest`).
+     */
+    async function triggerMunicipioIngestion(codigoIne) {
+        // TODO: Implementar fetch POST a `${BASE_URL}/municipios/${codigoIne}/ingest`
+    }
+
+    /**
+     * TODO: Obtener la serie demográfica 2015-2025 (`GET /api/municipios/{codigoIne}/demografia`).
      */
     async function fetchMunicipioDemografia(codigoIne) {
-        // TODO: Hacer fetch a `${BASE_URL}/municipios/${codigoIne}/demografia` y retornar el JSON
+        // TODO: Implementar fetch a `${BASE_URL}/municipios/${codigoIne}/demografia`
     }
 
     /**
-     * TODO: Realizar petición `GET /api/centros-sanitarios` para cargar la capa de centros
-     * de salud y urgencias de la Comunidad de Madrid en el mapa Leaflet.
-     * @returns {Promise<Array>}
+     * TODO: Obtener la red de centros sanitarios (`GET /api/centros-sanitarios`).
      */
     async function fetchCentrosSanitarios() {
-        // TODO: Hacer fetch a `${BASE_URL}/centros-sanitarios` y retornar el JSON
+        // TODO: Implementar fetch a `${BASE_URL}/centros-sanitarios`
     }
 
     /**
-     * TODO: Realizar petición `GET /api/convocatorias` con filtro opcional `codigo_ine`.
-     * @param {string|null} codigoIne
-     * @returns {Promise<Array>}
+     * TODO: Obtener las convocatorias BDNS (`GET /api/convocatorias`).
      */
     async function fetchConvocatorias(codigoIne = null) {
-        // TODO: Hacer fetch a `${BASE_URL}/convocatorias` y retornar el JSON
+        // TODO: Implementar fetch a `${BASE_URL}/convocatorias`
     }
 
     return {
         fetchMunicipios,
         fetchMunicipioDetail,
+        triggerMunicipioIngestion,
         fetchMunicipioDemografia,
         fetchCentrosSanitarios,
         fetchConvocatorias,

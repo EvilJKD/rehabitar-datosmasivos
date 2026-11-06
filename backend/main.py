@@ -1,6 +1,9 @@
 """
 Aplicación principal FastAPI del proyecto Re-Habitar PoC.
-Define los endpoints REST para las consultas C1-C4 y el montaje del frontend estático.
+Implementa el patrón de Ingesta Híbrida (Carga Semilla + Hidratación Bajo Demanda):
+cuando el usuario selecciona un municipio en el Frontend, si aún no está hidratado en BD,
+el backend invoca a las fuentes de datos (INE, BDNS, CartoCiudad), persiste el registro
+en PostgreSQL y lo devuelve al Frontend.
 """
 
 import os
@@ -20,7 +23,7 @@ from schemas import (
 )
 
 app = FastAPI(
-    title="Re-Habitar PoC - Viabilidad Demográfica y Ayudas Rurales (CAM)",
+    title="Re-Habitar PoC - Ingesta Híbrida y Viabilidad Demográfica (CAM)",
     version="1.0.0",
 )
 
@@ -33,11 +36,29 @@ app.add_middleware(
 )
 
 
+async def ensure_municipio_hydrated(
+    db: AsyncSession, codigo_ine: str, force_refresh: bool = False
+) -> str:
+    """
+    TODO (Orquestador de Ingesta Bajo Demanda en el Backend):
+    1. Consultar en la tabla `municipios` si el pueblo `codigo_ine` tiene `hidratado == True`.
+    2. Si `hidratado == True` y `not force_refresh`:
+       - No necesita llamar a las APIs externas; retornar `origen_datos = "CACHE_POSTGRESQL"`.
+    3. Si `hidratado == False` (o `force_refresh == True`):
+       - Paso A (P1): Llamar a `await hydrate_infraestructura_on_demand(db, codigo_ine)` para guardar conectividad/vivienda.
+       - Paso B (P2): Llamar a `await hydrate_demografia_on_demand(db, codigo_ine)` para descargar del INE e insertar la serie 2015-2025 en `demografia_anual`.
+       - Paso C (P3 + P5): Obtener urgencias más cercana por KNN PostGIS y llamar a `await get_or_hydrate_route_for_municipio(...)` para consultar CartoCiudad y persistir la ruta en BD.
+       - Paso D (P4): Llamar a `await hydrate_grants_on_demand(db, codigo_ine)` para cruzar e insertar sus ayudas BDNS en `convocatoria_municipio` y marcar `municipios.hidratado = TRUE`.
+       - Retornar `origen_datos = "INGESTA_EN_VIVO_GUARDADA_EN_BD"`.
+    """
+    pass
+
+
 @app.get("/api/health", tags=["Sistema"])
 async def health_check(db: AsyncSession = Depends(get_db)) -> Dict:
     """
-    TODO: Comprobar la conexión a la base de datos ejecutando `SELECT PostGIS_Full_Version();`
-    y devolver un JSON `{"status": "ok", "postgis": ...}`.
+    TODO: Verificar el estado de PostgreSQL/PostGIS y devolver cuántos municipios
+    están ya hidratados en BD frente al total (`SELECT COUNT(*) FILTER (WHERE hidratado) ...`).
     """
     pass
 
@@ -49,7 +70,7 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> Dict:
 )
 async def list_municipios(
     semaforo: Optional[str] = Query(
-        None, description="Filtrar por color semafórico: VERDE, AMBAR o ROJO"
+        None, description="Filtrar por color semafórico: VERDE, AMBAR, ROJO o PENDIENTE"
     ),
     w_demo: Optional[float] = Query(None, ge=0.0, le=1.0),
     w_health: Optional[float] = Query(None, ge=0.0, le=1.0),
@@ -58,13 +79,10 @@ async def list_municipios(
     db: AsyncSession = Depends(get_db),
 ) -> List[MunicipioListItemSchema]:
     """
-    TODO: Endpoint principal para el listado y mapa semafórico de municipios:
-    1. Obtener municipios base con `get_all_municipios_base(db)` (P1).
-    2. Obtener resumen demográfico con `get_demografia_summary_all(db)` (P2).
-    3. Obtener centro de urgencias más cercano con `get_nearest_emergency_all(db)` (P3).
-    4. Obtener resumen de ayudas activas con `get_grants_summary_all(db)` (P4).
-    5. Evaluar para cada municipio su puntuación y semáforo con `evaluate_wlc_for_municipio(...)` (P5).
-    6. Filtrar por `semaforo` si se especificó en la query y retornar la lista de `MunicipioListItemSchema`.
+    TODO: Devolver todos los municipios registrados en la carga inicial:
+    - Los municipios con `hidratado == True` devuelven su índice WLC y semáforo calculado (`VERDE`, `AMBAR`, `ROJO`).
+    - Los municipios con `hidratado == False` también se devuelven (con `hidratado = False` y estado preliminar/pendiente)
+      para que aparezcan en el mapa y selector del Frontend listos para ser clicados e hidratados bajo demanda.
     """
     pass
 
@@ -76,6 +94,9 @@ async def list_municipios(
 )
 async def get_municipio_detail(
     codigo_ine: str,
+    force_refresh: bool = Query(
+        False, description="Si es True, fuerza la re-ingesta en vivo desde las fuentes externas"
+    ),
     w_demo: Optional[float] = Query(None, ge=0.0, le=1.0),
     w_health: Optional[float] = Query(None, ge=0.0, le=1.0),
     w_grants: Optional[float] = Query(None, ge=0.0, le=1.0),
@@ -83,13 +104,27 @@ async def get_municipio_detail(
     db: AsyncSession = Depends(get_db),
 ) -> MunicipioDetailSchema:
     """
-    TODO: Endpoint de detalle de un municipio al hacer clic en el mapa:
-    1. Buscar el municipio con `get_municipio_by_ine(db, codigo_ine)` (lanzar HTTP 404 si no existe).
-    2. Obtener sus indicadores demográficos (P2) y sus centros sanitarios más cercanos vía KNN PostGIS (P3).
-    3. Invocar en vivo a `calculate_route_cartociudad(...)` (P5) para obtener los km por carretera,
-       minutos estimados y polilínea hacia el centro de urgencias más cercano.
-    4. Obtener la lista de ayudas activas del municipio con `get_convocatorias(db, codigo_ine=codigo_ine)` (P4).
-    5. Calcular el desglose WLC con `evaluate_wlc_for_municipio(...)` (P5) y devolver `MunicipioDetailSchema`.
+    TODO: Endpoint clave de la Ingesta Híbrida cuando el usuario selecciona un pueblo en el Frontend:
+    1. Llamar primero a `origen = await ensure_municipio_hydrated(db, codigo_ine, force_refresh)`.
+       (Si el pueblo no tenía datos en BD, en este paso se consultan INE, BDNS y CartoCiudad y se guardan en PostgreSQL).
+    2. Leer los datos ya persistidos en PostgreSQL (demografía, centro KNN, ruta CartoCiudad, ayudas BDNS).
+    3. Evaluar el motor WLC (`evaluate_wlc_for_municipio`) y devolver `MunicipioDetailSchema` incluyendo `origen_datos = origen`.
+    """
+    pass
+
+
+@app.post(
+    "/api/municipios/{codigo_ine}/ingest",
+    response_model=MunicipioDetailSchema,
+    tags=["Ingesta Híbrida Bajo Demanda"],
+)
+async def trigger_municipio_ingestion(
+    codigo_ine: str,
+    db: AsyncSession = Depends(get_db),
+) -> MunicipioDetailSchema:
+    """
+    TODO: Endpoint explícito para forzar desde el botón del Frontend la ingesta/actualización
+    en vivo de un municipio contra las fuentes externas (`force_refresh=True`) y guardarlo en BD.
     """
     pass
 
@@ -103,11 +138,8 @@ async def get_municipio_demografia(
     codigo_ine: str, db: AsyncSession = Depends(get_db)
 ) -> DemografiaSerieResponseSchema:
     """
-    TODO: Endpoint para alimentar la gráfica histórica 2015-2025 en Chart.js:
-    1. Consultar el importe total de ayudas por habitante del municipio.
-    2. Llamar a `get_demografia_serie_by_municipio(db, codigo_ine, importe_total_ayudas_hab)`.
-    3. Si no existe el municipio, lanzar `HTTPException(status_code=404)`.
-    4. Retornar `DemografiaSerieResponseSchema`.
+    TODO: Asegurar que la demografía del municipio esté hidratada en BD y devolver
+    la serie histórica 2015-2025 para el gráfico de Chart.js.
     """
     pass
 
@@ -123,9 +155,7 @@ async def list_convocatorias(
     db: AsyncSession = Depends(get_db),
 ) -> List[ConvocatoriaMunicipioItemSchema]:
     """
-    TODO: Endpoint de listado de convocatorias de la BDNS:
-    - Llamar a `get_convocatorias(db, codigo_ine=codigo_ine, categoria=categoria)` y
-      devolver la lista validada con `ConvocatoriaMunicipioItemSchema`.
+    TODO: Devolver las convocatorias de la BDNS filtradas por municipio y/o categoría.
     """
     pass
 
@@ -133,8 +163,7 @@ async def list_convocatorias(
 @app.get("/api/centros-sanitarios", tags=["P3 Sanidad CAM"])
 async def list_centros_sanitarios(db: AsyncSession = Depends(get_db)) -> List[Dict]:
     """
-    TODO: Devolver todos los centros sanitarios de la tabla `centros_sanitarios`
-    para poder representarlos como capa adicional sobre el mapa Leaflet.
+    TODO: Devolver todos los centros sanitarios de `centros_sanitarios` para el mapa Leaflet.
     """
     pass
 
