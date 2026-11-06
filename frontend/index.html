@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Re-Habitar PoC | Viabilidad Demográfica y Subvenciones Rurales (Comunidad de Madrid)</title>
+
+    <!-- Leaflet 1.9.4 CSS (CDN) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+
+    <!-- Hoja de estilos propia -->
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+    <!-- =========================================================================
+         TODO 1: Cabecera Superior (Header)
+         - Título del proyecto Re-Habitar
+         - Botones de filtro por color semafórico WLC (Todos, Rojo, Ámbar, Verde)
+         - Selector desplegable <select id="municipio-select"> de municipios
+         ========================================================================= -->
+    <header class="topbar">
+        <!-- TODO: Completar estructura de la barra superior -->
+    </header>
+
+    <!-- =========================================================================
+         TODO 2: Contenedor Principal Dividido en 2 Paneles (Mapa + Dashboard)
+         ========================================================================= -->
+    <main class="workspace">
+        <!-- PANEL IZQUIERDO: Mapa Temático Leaflet -->
+        <section class="map-panel">
+            <!-- Contenedor obligatorio donde Leaflet montará el mapa -->
+            <div id="map"></div>
+
+            <!-- TODO: Añadir leyenda semafórica WLC y tarjeta flotante con km/minutos de la ruta sanitaria -->
+        </section>
+
+        <!-- PANEL DERECHO: Ficha Detallada WLC, Gráfica Chart.js y Subvenciones BDNS -->
+        <section class="dashboard-panel">
+            <!-- TODO 2.1: Cabecera del municipio seleccionado y badge con puntuación WLC (0-100) -->
+
+            <!-- TODO 2.2: Tarjetas KPI (Población actual, Variación 2015-2025, Envejecimiento, Ayudas €/hab) -->
+
+            <!-- TODO 2.3: Desglose de las 4 dimensiones del Índice WLC (barras de progreso) -->
+
+            <!-- TODO 2.4: Ficha del centro de urgencias 24h más cercano (KNN PostGIS + CartoCiudad) -->
+
+            <!-- TODO 2.5: Gráfica Chart.js con la evolución histórica 2015-2025 vs ayudas -->
+            <div class="chart-container">
+                <canvas id="demografiaChart"></canvas>
+            </div>
+
+            <!-- TODO 2.6: Contenedor #grants-list para listar las convocatorias activas de la BDNS -->
+            <div id="grants-list"></div>
+        </section>
+    </main>
+
+    <!-- Librerías externas por CDN (Leaflet y Chart.js) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Módulos JS de la aplicación (Esqueletos a completar por el equipo) -->
+    <script src="/js/api.js"></script>
+    <script src="/js/map.js"></script>
+    <script src="/js/dashboard.js"></script>
+</body>
+</html>

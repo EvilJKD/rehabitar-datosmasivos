@@ -1,0 +1,24 @@
+/* =============================================================================
+ * Hoja de Estilos Principal (`style.css`) - Esqueleto para completar
+ * ============================================================================= */
+
+:root {
+    /* Colores semafóricos recomendados para el Índice WLC */
+    --verde: #10b981;
+    --ambar: #f59e0b;
+    --rojo: #ef4444;
+}
+
+/* TODO 1: Reset básico de márgenes y configuración de tipografía en `body` */
+
+
+/* TODO 2: Layout `.workspace` en dos columnas (Mapa a la izquierda, Dashboard a la derecha) */
+
+
+/* TODO 3: Dimensiones obligatorias del contenedor `#map` (ej. width: 100%; height: 100%) */
+
+
+/* TODO 4: Estilos para los marcadores semafóricos de Leaflet (`.wlc-marker-pin`) y leyenda */
+
+
+/* TODO 5: Estilos para las tarjetas del panel derecho (`.card`, barras de progreso WLC y lista `#grants-list`) */

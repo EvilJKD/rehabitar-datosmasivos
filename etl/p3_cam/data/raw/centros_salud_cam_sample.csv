@@ -1,0 +1,11 @@
+id_centro,nombre,tipo_centro,municipio_nombre,direccion,tiene_urgencias,horario,telefono,latitud,longitud
+CS-BUITRAGO-01,Centro de Salud Buitrago del Lozoya (SAR Urgencias),Centro de Salud con Urgencias 24h,Buitrago del Lozoya,C/ Real de Castillo 12,true,24 Horas (Urgencias SAR / Atención Continuada),918680214,40.9936,-3.6368
+CS-TORRELAGUNA-01,Centro de Salud Torrelaguna (SAR Urgencias),Centro de Salud con Urgencias 24h,Torrelaguna,C/ Malacuera 17,true,24 Horas (Urgencias SAR / Atención Continuada),918430051,40.8291,-3.5398
+CS-RASCAFRIA-01,Centro de Salud Rascafría (SAR Urgencias),Centro de Salud con Urgencias 24h,Rascafría,Avda. del Valle 28,true,24 Horas (Urgencias SAR / Atención Continuada),918691129,40.9032,-3.8781
+CS-LA-CABRERA-01,Centro de Salud La Cabrera (PAC Urgencias),Punto de Atención Continuada 24h,La Cabrera,C/ de la Salud 4,true,24 Horas (Urgencias PAC Norte),918688110,40.8654,-3.6132
+HOSP-INFANTA-SOFIA,Hospital Universitario Infanta Sofía,Hospital de Referencia Comarcal,San Sebastián de los Reyes,Paseo de Europa 34,true,24 Horas (Urgencias Hospitalarias Nivel II),911914000,40.5582,-3.6119
+CL-MONTEJO-01,Consultorio Local Montejo de la Sierra,Consultorio Local Rural,Montejo de la Sierra,Plaza Mayor 1,false,L-V 09:00-14:00 (Sin Urgencias Nocturnas),918697022,41.0588,-3.5305
+CL-PATONES-01,Consultorio Local Patones de Abajo,Consultorio Local Rural,Patones,Avda. de Madrid 14,false,L-V 08:30-14:30 (Sin Urgencias Nocturnas),918432018,40.8548,-3.4852
+CL-LOZOYUELA-01,Consultorio Local Lozoyuela,Consultorio Local Rural,Lozoyuela-Navas-Sieteiglesias,Avda. de Madrid 42,false,L-V 08:00-15:00 (Sin Urgencias Nocturnas),918694511,40.9281,-3.6172
+CL-HORCAJUELO-01,Consultorio Local Horcajuelo de la Sierra,Consultorio Auxiliar Rural,Horcajuelo de la Sierra,C/ Mayor 8,false,M-J 10:00-13:00 (Visita Médica Itinerante),918697105,41.0595,-3.5448
+CL-HIRUELA-01,Consultorio Local La Hiruela,Consultorio Auxiliar Rural,La Hiruela,C/ Enmedio 5,false,X-V 11:00-13:30 (Visita Médica Itinerante),918697219,41.0775,-3.4540
