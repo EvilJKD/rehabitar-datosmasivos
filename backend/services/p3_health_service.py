@@ -7,7 +7,10 @@ espacial KNN (`<->`) acelerado mediante índices GiST (`idx_centros_sanitarios_g
 e `idx_centros_urgencias_geom`) y el cálculo geodésico `ST_DistanceSphere`.
 """
 
+import asyncio
 import logging
+import os
+import sys
 from typing import Any, Dict, List, Optional
 
 try:
@@ -20,7 +23,66 @@ except ImportError:  # pragma: no cover - permite pruebas unitarias sin entorno 
 
     AsyncSession = Any  # type: ignore
 
+ETL_P3_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "etl", "p3_cam")
+)
+if os.path.isdir(ETL_P3_DIR) and ETL_P3_DIR not in sys.path:
+    sys.path.insert(0, ETL_P3_DIR)
+
+import etl_sanidad as cam_etl  # noqa: E402
+
 logger = logging.getLogger("backend.p3_health_service")
+
+SQL_GET_MUNICIPIO_NAME = text(
+    """
+    SELECT nombre
+    FROM municipios
+    WHERE codigo_ine = :codigo_ine
+    LIMIT 1;
+    """
+)
+
+SQL_COUNT_CENTROS_URGENCIAS = text(
+    """
+    SELECT COUNT(*) AS total_urg
+    FROM centros_sanitarios
+    WHERE tiene_urgencias = TRUE;
+    """
+)
+
+SQL_COUNT_CENTROS_MUNICIPIO = text(
+    """
+    SELECT COUNT(*) AS total_mun
+    FROM centros_sanitarios
+    WHERE UPPER(municipio_nombre) = UPPER(:municipio_nombre);
+    """
+)
+
+SQL_UPSERT_CENTRO_SANITARIO = text(
+    """
+    INSERT INTO centros_sanitarios (
+        id_centro, nombre, tipo, tiene_urgencias,
+        municipio_nombre, direccion, horario, telefono,
+        latitud, longitud, geom
+    )
+    VALUES (
+        :id_centro, :nombre, :tipo, :tiene_urgencias,
+        :municipio_nombre, :direccion, :horario, :telefono,
+        :latitud, :longitud, ST_SetSRID(ST_MakePoint(:longitud, :latitud), 4326)
+    )
+    ON CONFLICT (id_centro) DO UPDATE SET
+        nombre = EXCLUDED.nombre,
+        tipo = EXCLUDED.tipo,
+        tiene_urgencias = EXCLUDED.tiene_urgencias,
+        municipio_nombre = EXCLUDED.municipio_nombre,
+        direccion = EXCLUDED.direccion,
+        horario = EXCLUDED.horario,
+        telefono = EXCLUDED.telefono,
+        latitud = EXCLUDED.latitud,
+        longitud = EXCLUDED.longitud,
+        geom = EXCLUDED.geom;
+    """
+)
 
 # Consulta espacial KNN (PostGIS <->) para obtener el centro con urgencias más cercano
 # a cada municipio registrado en la tabla `municipios` (Consulta 2 de la Propuesta).
@@ -160,6 +222,72 @@ def _row_to_health_center_dict(row_mapping: Any) -> Dict[str, Any]:
     }
 
 
+async def hydrate_health_centers_on_demand(
+    db: AsyncSession,
+    municipio_nombre: Optional[str] = None,
+    codigo_ine: Optional[str] = None,
+    force_refresh: bool = False,
+) -> int:
+    """
+    Hidrata bajo demanda `centros_sanitarios` consultando el endpoint de Datos Abiertos
+    de la Comunidad de Madrid cuando el municipio o la red de urgencias aún no están
+    persistidos en PostgreSQL (o si `force_refresh=True`).
+    Devuelve el número de centros insertados o actualizados.
+    """
+    resolved_municipio = municipio_nombre.strip() if municipio_nombre else None
+    if codigo_ine and not resolved_municipio:
+        res_mun = await db.execute(SQL_GET_MUNICIPIO_NAME, {"codigo_ine": codigo_ine})
+        row_mun = res_mun.mappings().first()
+        if row_mun and row_mun.get("nombre"):
+            resolved_municipio = str(row_mun["nombre"]).strip()
+
+    res_urg_count = await db.execute(SQL_COUNT_CENTROS_URGENCIAS)
+    row_urg_count = res_urg_count.mappings().first()
+    total_urg = int(row_urg_count["total_urg"]) if row_urg_count else 0
+
+    total_mun = 0
+    if resolved_municipio:
+        res_mun_count = await db.execute(
+            SQL_COUNT_CENTROS_MUNICIPIO, {"municipio_nombre": resolved_municipio}
+        )
+        row_mun_count = res_mun_count.mappings().first()
+        total_mun = int(row_mun_count["total_mun"]) if row_mun_count else 0
+
+    if not force_refresh and total_urg > 0 and (not resolved_municipio or total_mun > 0):
+        return 0
+
+    logger.info(
+        "Hidratación bajo demanda P3 desde API CAM (municipio=%s, codigo_ine=%s, force_refresh=%s)",
+        resolved_municipio,
+        codigo_ine,
+        force_refresh,
+    )
+    all_centers = await asyncio.to_thread(
+        cam_etl.fetch_cam_health_centers_api, None, True, force_refresh
+    )
+
+    if resolved_municipio:
+        target_mun = cam_etl._normalize_text(resolved_municipio)
+        centers_to_upsert = [
+            c
+            for c in all_centers
+            if cam_etl._normalize_text(c.get("municipio_nombre")) == target_mun
+            or (total_urg == 0 and bool(c.get("tiene_urgencias")))
+        ]
+    elif total_urg == 0:
+        urg_centers = [c for c in all_centers if bool(c.get("tiene_urgencias"))]
+        centers_to_upsert = urg_centers if urg_centers else list(all_centers)
+    else:
+        centers_to_upsert = list(all_centers)
+
+    if not centers_to_upsert:
+        return 0
+
+    await db.execute(SQL_UPSERT_CENTRO_SANITARIO, centers_to_upsert)
+    await db.commit()
+    return len(centers_to_upsert)
+
+
 async def get_nearest_emergency_all(db: AsyncSession) -> Dict[str, Dict[str, Any]]:
     """
     Ejecuta una consulta espacial en PostGIS que obtiene para cada municipio
@@ -181,15 +309,22 @@ async def get_nearest_emergency_all(db: AsyncSession) -> Dict[str, Dict[str, Any
 
 
 async def get_nearest_health_centers_for_municipio(
-    db: AsyncSession, codigo_ine: str
+    db: AsyncSession,
+    codigo_ine: str,
+    force_refresh: bool = False,
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """
-    Dado un `codigo_ine`, ejecuta la búsqueda KNN en PostGIS (`ORDER BY m.geom <-> c.geom LIMIT 1`)
-    para encontrar:
+    Dado un `codigo_ine`, garantiza primero la hidratación bajo demanda de los centros
+    sanitarios desde el endpoint de la CAM y ejecuta la búsqueda KNN en PostGIS
+    (`ORDER BY m.geom <-> c.geom LIMIT 1`) para encontrar:
     1. `"urgencias"`: El centro con `tiene_urgencias = TRUE` más cercano.
     2. `"consultorio"`: El centro sanitario o consultorio local más cercano (con o sin urgencias).
     Devuelve un diccionario `{"urgencias": ..., "consultorio": ...}`.
     """
+    await hydrate_health_centers_on_demand(
+        db, codigo_ine=codigo_ine, force_refresh=force_refresh
+    )
+
     res_urg = await db.execute(
         SQL_KNN_URGENCIA_FOR_MUNICIPIO, {"codigo_ine": codigo_ine}
     )
@@ -210,11 +345,12 @@ async def list_centros_sanitarios_service(
     db: AsyncSession,
     solo_urgencias: Optional[bool] = None,
     municipio_nombre: Optional[str] = None,
+    force_refresh: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Lista los centros sanitarios almacenados en `centros_sanitarios` para su representación
-    en la capa cartográfica Leaflet (Visualización 1), permitiendo filtrar por disponibilidad
-    de urgencias o nombre del municipio.
+    en la capa cartográfica Leaflet (Visualización 1). Si el filtro solicitado aún no
+    tiene datos en BD (o `force_refresh=True`), hidrata bajo demanda desde la API de la CAM.
     """
     conditions = []
     params: Dict[str, Any] = {}
@@ -247,22 +383,21 @@ async def list_centros_sanitarios_service(
         """
     )
 
+    if force_refresh:
+        await hydrate_health_centers_on_demand(
+            db, municipio_nombre=municipio_nombre, force_refresh=True
+        )
+
     result = await db.execute(query, params)
     rows = result.mappings().all()
 
-    return [
-        {
-            "id_centro": str(r["id_centro"]),
-            "nombre": str(r["nombre"]),
-            "tipo": str(r["tipo"]),
-            "tiene_urgencias": bool(r["tiene_urgencias"]),
-            "municipio_nombre": r.get("municipio_nombre"),
-            "direccion": r.get("direccion"),
-            "horario": r.get("horario"),
-            "telefono": r.get("telefono"),
-            "latitud": float(r["latitud"]),
-            "longitud": float(r["longitud"]),
-        }
-        for r in rows
-    ]
+    if not rows and not force_refresh:
+        inserted = await hydrate_health_centers_on_demand(
+            db, municipio_nombre=municipio_nombre, force_refresh=False
+        )
+        if inserted > 0:
+            result = await db.execute(query, params)
+            rows = result.mappings().all()
+
+    return [_row_to_health_center_dict(r) for r in rows]
 

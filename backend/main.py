@@ -174,16 +174,22 @@ async def list_centros_sanitarios(
     municipio_nombre: Optional[str] = Query(
         None, description="Filtrar por nombre del municipio (ej. 'Buitrago del Lozoya')"
     ),
+    force_refresh: bool = Query(
+        False,
+        description="Si es True, fuerza la consulta en vivo al endpoint de Datos Abiertos de la CAM",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> List[Dict]:
     """
     Devuelve los centros sanitarios de `centros_sanitarios` para el mapa Leaflet (P3).
-    Permite filtrar opcionalmente por disponibilidad de urgencias o nombre del municipio.
+    Permite filtrar por disponibilidad de urgencias o municipio y activa la hidratación
+    bajo demanda desde la API de Datos Abiertos de la Comunidad de Madrid cuando faltan datos.
     """
     return await list_centros_sanitarios_service(
         db,
         solo_urgencias=solo_urgencias,
         municipio_nombre=municipio_nombre,
+        force_refresh=force_refresh,
     )
 
 

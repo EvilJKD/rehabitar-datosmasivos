@@ -44,13 +44,13 @@ class TestP3CoordinateConversionAndNormalization(unittest.TestCase):
         self.assertIsNone(p3_etl.utm30n_etrs89_to_wgs84(-500.0, 4500000.0))
 
     def test_detect_tiene_urgencias(self):
-        """Verifica la detección heurística de urgencias / SAR / SUAP / PAC 24h."""
+        """Verifica la detección heurística de urgencias / SAR / SUAP / PAC 24h sin falsos positivos."""
         self.assertTrue(
             p3_etl.detect_tiene_urgencias(
                 tipo="Centro de Salud",
                 nombre="Centro de Salud Buitrago del Lozoya",
                 horario="Atención continuada 24 horas",
-                 municipio="Buitrago del Lozoya",
+                municipio="Buitrago del Lozoya",
             )
         )
         self.assertTrue(
@@ -67,6 +67,15 @@ class TestP3CoordinateConversionAndNormalization(unittest.TestCase):
                 nombre="Consultorio Local Madarcos",
                 horario="Lunes a Viernes de 10:00 a 12:00",
                 municipio="Madarcos",
+            )
+        )
+        # Un Centro de Salud sin oferta/horario de urgencias fuera de cabeceras SAR no es urgencias 24h
+        self.assertFalse(
+            p3_etl.detect_tiene_urgencias(
+                tipo="Centro de Salud",
+                nombre="Centro de Salud Navacerrada",
+                horario="Lunes a Viernes de 08:00 a 21:00",
+                municipio="Navacerrada",
             )
         )
 
@@ -87,10 +96,10 @@ class TestP3CoordinateConversionAndNormalization(unittest.TestCase):
 
     def test_normalize_cam_record_buitrago_homogenization(self):
         """
-        Verifica que un registro crudo de la CAM de Buitrago del Lozoya con coordenadas UTM
-        se normaliza al identificador canónico 'CS-28027' (Sección 7.2 de la Propuesta).
+        Verifica que 'Buitrago del Lozoya' se homologa a 'CS-28027' (Sección 7.2) y que
+        'Gargantilla del Lozoya y Pinilla de Buitrago' NO colisiona con 'CS-28027'.
         """
-        raw_row = {
+        raw_buitrago = {
             "codigo_centro": "2802701",
             "centro_nro_registro": "CS28027",
             "centro_denominacion": "Consultorio Local Buitrago del Lozoya",
@@ -105,13 +114,148 @@ class TestP3CoordinateConversionAndNormalization(unittest.TestCase):
             "direccion_coordenada_x": "446431",
             "direccion_coordenada_y": "4538273",
         }
-        normalized = p3_etl.normalize_cam_record(raw_row)
+        normalized = p3_etl.normalize_cam_record(raw_buitrago)
         self.assertIsNotNone(normalized)
         self.assertEqual(normalized["id_centro"], "CS-28027")
         self.assertTrue(normalized["tiene_urgencias"])
         self.assertEqual(normalized["municipio_nombre"], "Buitrago del Lozoya")
         self.assertTrue(40.0 <= normalized["latitud"] <= 41.3)
         self.assertTrue(-4.6 <= normalized["longitud"] <= -3.0)
+
+        # Municipio vecino con 'Buitrago' en el nombre debe mantener su propio ID y no marcar urgencias
+        raw_pinilla = {
+            "centro_nro_registro": "CS99901",
+            "centro_denominacion": "Consultorio Pinilla de Buitrago",
+            "centro_tipo_descripcion": "Consultorio de atención primaria",
+            "municipio_nombre": "Gargantilla del Lozoya y Pinilla de Buitrago",
+            "localizacion_coordenada_x": "441500",
+            "localizacion_coordenada_y": "4535000",
+        }
+        normalized_pinilla = p3_etl.normalize_cam_record(raw_pinilla)
+        self.assertIsNotNone(normalized_pinilla)
+        self.assertEqual(normalized_pinilla["id_centro"], "CS99901")
+        self.assertFalse(normalized_pinilla["tiene_urgencias"])
+
+    def test_cam_api_memory_cache_and_force_refresh(self):
+        """
+        Verifica que `_CAM_API_CACHE` evita descargar repetidamente desde el endpoint de la CAM
+        cuando `force_refresh=False` y vuelve a consultar la API cuando `force_refresh=True`.
+        """
+        sample_payload = {
+            "data": [
+                {
+                    "centro_nro_registro": "CL-28078",
+                    "centro_denominacion": "Consultorio Local Madarcos",
+                    "centro_tipo_descripcion": "Consultorio de atención primaria",
+                    "municipio_nombre": "Madarcos",
+                    "localizacion_coordenada_x": "451100",
+                    "localizacion_coordenada_y": "4543100",
+                }
+            ]
+        }
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = sample_payload
+
+        p3_etl._CAM_API_CACHE["timestamp"] = 0.0
+        p3_etl._CAM_API_CACHE["records"] = []
+        try:
+            with patch(
+                "etl_sanidad.discover_cam_sanidad_resource_urls",
+                return_value=[("JSON", "https://datos.comunidad.madrid/mock.json")],
+            ), patch("etl_sanidad.requests.get", return_value=mock_resp) as mock_get:
+                first = p3_etl.fetch_cam_health_centers_api(force_refresh=False)
+                second = p3_etl.fetch_cam_health_centers_api(force_refresh=False)
+                third = p3_etl.fetch_cam_health_centers_api(force_refresh=True)
+
+            self.assertEqual(len(first), 1)
+            self.assertEqual(len(second), 1)
+            self.assertEqual(len(third), 1)
+            # Solo 2 descargas HTTP (la primera y la de force_refresh=True); la segunda usa caché
+            self.assertEqual(mock_get.call_count, 2)
+        finally:
+            p3_etl._CAM_API_CACHE["timestamp"] = 0.0
+            p3_etl._CAM_API_CACHE["records"] = []
+
+    def test_run_etl_p3_seed_load_and_ingest_for_municipio(self):
+        """
+        Verifica que `run_etl_p3` realiza una carga semilla ligera (urgencias + municipios semilla)
+        y que `ingest_centros_for_municipio` filtra sin sensibilidad a tildes bajo demanda.
+        """
+        fake_centers = [
+            {
+                "id_centro": "CS-28027",
+                "nombre": "Consultorio Local Buitrago del Lozoya",
+                "tipo": "Centro de Salud / Urgencias",
+                "tiene_urgencias": True,
+                "municipio_nombre": "Buitrago del Lozoya",
+                "direccion": "C/ Real 14",
+                "horario": "24 Horas",
+                "telefono": "918680116",
+                "latitud": 40.9929,
+                "longitud": -3.6368,
+            },
+            {
+                "id_centro": "CL-28069",
+                "nombre": "Consultorio La Hiruela",
+                "tipo": "Consultorio de atención primaria",
+                "tiene_urgencias": False,
+                "municipio_nombre": "La Hiruela",
+                "direccion": "C/ Pilón 1",
+                "horario": "Horario Atención Primaria",
+                "telefono": None,
+                "latitud": 41.077,
+                "longitud": -3.455,
+            },
+            {
+                "id_centro": "CL-28078",
+                "nombre": "Consultorio Madarcos",
+                "tipo": "Consultorio de atención primaria",
+                "tiene_urgencias": False,
+                "municipio_nombre": "Madarcos",
+                "direccion": "Plaza Mayor 1",
+                "horario": "Horario Atención Primaria",
+                "telefono": None,
+                "latitud": 41.047,
+                "longitud": -3.582,
+            },
+            {
+                "id_centro": "CL-28120",
+                "nombre": "Consultorio Rascafría",
+                "tipo": "Consultorio de atención primaria",
+                "tiene_urgencias": False,
+                "municipio_nombre": "Rascafría",
+                "direccion": "Av. El Paular 5",
+                "horario": "Horario Atención Primaria",
+                "telefono": None,
+                "latitud": 40.904,
+                "longitud": -3.879,
+            },
+        ]
+
+        with patch("etl_sanidad.fetch_cam_health_centers_api", return_value=fake_centers), patch(
+            "etl_sanidad.upsert_health_centers_to_db", return_value=(2, 1)
+        ) as mock_upsert:
+            summary = p3_etl.run_etl_p3()
+            self.assertIn("semilla", summary)
+            seeded = mock_upsert.call_args[0][0]
+            seeded_ids = {c["id_centro"] for c in seeded}
+            # Solo CS-28027 (urgencias + Buitrago) y CL-28069 (La Hiruela); Madarcos y Rascafría quedan bajo demanda
+            self.assertEqual(seeded_ids, {"CS-28027", "CL-28069"})
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (1,)  # Ya existen urgencias en BD
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch("etl_sanidad.fetch_cam_health_centers_api", return_value=fake_centers), patch(
+            "etl_sanidad.upsert_health_centers_to_db", return_value=(1, 0)
+        ) as mock_upsert_mun:
+            # Búsqueda sin tilde ('Rascafria') debe encontrar 'Rascafría'
+            count = p3_etl.ingest_centros_for_municipio("Rascafria", conn=mock_conn)
+            self.assertEqual(count, 1)
+            ingested = mock_upsert_mun.call_args[0][0]
+            self.assertEqual([c["id_centro"] for c in ingested], ["CL-28120"])
 
     def test_parse_cam_json_and_csv_payloads(self):
         """Verifica el parseo tanto de payloads JSON como CSV de Datos Abiertos CAM."""
@@ -151,7 +295,10 @@ class TestP3LiveCAMOpenDataAPIConnection(unittest.TestCase):
         urls = p3_etl.discover_cam_sanidad_resource_urls(timeout=15)
         self.assertTrue(len(urls) >= 1, "Debe existir al menos una URL de recurso de la CAM")
 
-        centers = p3_etl.fetch_cam_health_centers_api(timeout=25)
+        # Garantizar consulta en vivo limpia sin residuo de caché previa
+        p3_etl._CAM_API_CACHE["timestamp"] = 0.0
+        p3_etl._CAM_API_CACHE["records"] = []
+        centers = p3_etl.fetch_cam_health_centers_api(timeout=25, force_refresh=True)
         self.assertGreater(
             len(centers),
             50,
@@ -257,7 +404,7 @@ class TestP3DatabaseUpsertAndServiceIntegration(unittest.IsolatedAsyncioTestCase
         mock_result_all = MagicMock()
         mock_result_all.mappings.return_value.all.return_value = [
             {
-                "codigo_ine": "28079",  # Madarcos (28079 / 28080)
+                "codigo_ine": "28078",  # Madarcos (28078)
                 "municipio_origen": "Madarcos",
                 "id_centro": "CS-28027",
                 "nombre": "Consultorio Local Buitrago del Lozoya",
@@ -275,11 +422,18 @@ class TestP3DatabaseUpsertAndServiceIntegration(unittest.IsolatedAsyncioTestCase
         mock_db.execute.return_value = mock_result_all
 
         nearest_map = await p3_health_service.get_nearest_emergency_all(mock_db)
-        self.assertIn("28079", nearest_map)
-        self.assertEqual(nearest_map["28079"]["id_centro"], "CS-28027")
-        self.assertAlmostEqual(nearest_map["28079"]["distancia_euclidea_km"], 5.74)
+        self.assertIn("28078", nearest_map)
+        self.assertEqual(nearest_map["28078"]["id_centro"], "CS-28027")
+        self.assertAlmostEqual(nearest_map["28078"]["distancia_euclidea_km"], 5.74)
 
-        # Mock para `get_nearest_health_centers_for_municipio`
+        # Mock para `get_nearest_health_centers_for_municipio` (ya hidratado en BD)
+        mock_res_mun_name = MagicMock()
+        mock_res_mun_name.mappings.return_value.first.return_value = {"nombre": "Madarcos"}
+        mock_res_urg_count = MagicMock()
+        mock_res_urg_count.mappings.return_value.first.return_value = {"total_urg": 12}
+        mock_res_mun_count = MagicMock()
+        mock_res_mun_count.mappings.return_value.first.return_value = {"total_mun": 1}
+
         mock_res_urg = MagicMock()
         mock_res_urg.mappings.return_value.first.return_value = {
             "id_centro": "CS-28027",
@@ -308,13 +462,117 @@ class TestP3DatabaseUpsertAndServiceIntegration(unittest.IsolatedAsyncioTestCase
             "longitud": -3.5819,
             "distancia_euclidea_km": 0.12,
         }
-        mock_db.execute.side_effect = [mock_res_urg, mock_res_cons]
+        mock_db.execute.side_effect = [
+            mock_res_mun_name,
+            mock_res_urg_count,
+            mock_res_mun_count,
+            mock_res_urg,
+            mock_res_cons,
+        ]
 
         detail_centers = await p3_health_service.get_nearest_health_centers_for_municipio(
-            mock_db, "28079"
+            mock_db, "28078"
         )
         self.assertEqual(detail_centers["urgencias"]["id_centro"], "CS-28027")
         self.assertEqual(detail_centers["consultorio"]["id_centro"], "CL-MADARCOS")
+
+    async def test_p3_on_demand_hydration_in_backend_service(self):
+        """
+        Verifica el flujo on-demand en `p3_health_service.py`:
+        1. Cuando `centros_sanitarios` no tiene datos del municipio solicitado, invoca
+           a `fetch_cam_health_centers_api`, ejecuta `SQL_UPSERT_CENTRO_SANITARIO` y hace `commit()`.
+        2. `list_centros_sanitarios_service` auto-hidrata si el primer `SELECT` devuelve `[]`.
+        """
+        from services import p3_health_service
+
+        cam_records = [
+            {
+                "id_centro": "CS-28027",
+                "nombre": "Consultorio Local Buitrago del Lozoya",
+                "tipo": "Centro de Salud / Urgencias",
+                "tiene_urgencias": True,
+                "municipio_nombre": "Buitrago del Lozoya",
+                "direccion": "C/ Real 14",
+                "horario": "24 Horas",
+                "telefono": "918680116",
+                "latitud": 40.992912,
+                "longitud": -3.636845,
+            },
+            {
+                "id_centro": "CL-28078",
+                "nombre": "Consultorio Local Madarcos",
+                "tipo": "Consultorio de atención primaria",
+                "tiene_urgencias": False,
+                "municipio_nombre": "Madarcos",
+                "direccion": "Plaza Mayor 1",
+                "horario": "Horario de Atención Primaria",
+                "telefono": None,
+                "latitud": 41.0471,
+                "longitud": -3.5821,
+            },
+        ]
+
+        # Escenario 1: `hydrate_health_centers_on_demand` por codigo_ine cuando el pueblo aún no está en BD
+        mock_db = AsyncMock()
+        res_mun_name = MagicMock()
+        res_mun_name.mappings.return_value.first.return_value = {"nombre": "Madarcos"}
+        res_urg_count = MagicMock()
+        res_urg_count.mappings.return_value.first.return_value = {"total_urg": 5}
+        res_mun_count = MagicMock()
+        res_mun_count.mappings.return_value.first.return_value = {"total_mun": 0}
+        res_upsert = MagicMock()
+        mock_db.execute.side_effect = [res_mun_name, res_urg_count, res_mun_count, res_upsert]
+
+        with patch.object(
+            p3_health_service.cam_etl,
+            "fetch_cam_health_centers_api",
+            return_value=cam_records,
+        ) as mock_fetch:
+            inserted = await p3_health_service.hydrate_health_centers_on_demand(
+                mock_db, codigo_ine="28078"
+            )
+
+        self.assertEqual(inserted, 1)
+        mock_fetch.assert_called_once()
+        mock_db.commit.assert_awaited_once()
+        upsert_sql_arg, upsert_rows_arg = mock_db.execute.call_args_list[-1][0]
+        self.assertIn("INSERT INTO centros_sanitarios", str(upsert_sql_arg))
+        self.assertEqual([r["id_centro"] for r in upsert_rows_arg], ["CL-28078"])
+
+        # Escenario 2: `list_centros_sanitarios_service` devuelve [] inicialmente, auto-hidrata desde CAM y re-consulta
+        mock_db_list = AsyncMock()
+        res_empty_select = MagicMock()
+        res_empty_select.mappings.return_value.all.return_value = []
+        res_list_urg_count = MagicMock()
+        res_list_urg_count.mappings.return_value.first.return_value = {"total_urg": 5}
+        res_list_mun_count = MagicMock()
+        res_list_mun_count.mappings.return_value.first.return_value = {"total_mun": 0}
+        res_list_upsert = MagicMock()
+        res_populated_select = MagicMock()
+        res_populated_select.mappings.return_value.all.return_value = [cam_records[1]]
+
+        mock_db_list.execute.side_effect = [
+            res_empty_select,
+            res_list_urg_count,
+            res_list_mun_count,
+            res_list_upsert,
+            res_populated_select,
+        ]
+
+        with patch.object(
+            p3_health_service.cam_etl,
+            "fetch_cam_health_centers_api",
+            return_value=cam_records,
+        ) as mock_fetch_list:
+            centers_list = await p3_health_service.list_centros_sanitarios_service(
+                mock_db_list, municipio_nombre="Madarcos"
+            )
+
+        mock_fetch_list.assert_called_once()
+        mock_db_list.commit.assert_awaited_once()
+        self.assertEqual(len(centers_list), 1)
+        self.assertEqual(centers_list[0]["id_centro"], "CL-28078")
+        self.assertIsNone(centers_list[0]["distancia_euclidea_km"])
 
 
 if __name__ == "__main__":

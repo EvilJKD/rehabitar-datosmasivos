@@ -19,6 +19,9 @@ import io
 import json
 import math
 import os
+import re
+import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
 import requests
 
@@ -71,16 +74,34 @@ SAR_24H_MUNICIPALITIES = {
     "BUITRAGO DEL LOZOYA",
     "TORRELAGUNA",
     "RASCAFRIA",
-    "RASCAFRÍA",
     "LA CABRERA",
     "SOTO DEL REAL",
     "MANZANARES EL REAL",
     "ALGETE",
     "SAN SEBASTIAN DE LOS REYES",
-    "SAN SEBASTIÁN DE LOS REYES",
     "COLMENAR VIEJO",
     "TRES CANTOS",
 }
+
+# Municipios semilla para carga inicial ligera (el resto se hidrata bajo demanda)
+DEFAULT_SEED_MUNICIPIOS = ["La Hiruela", "Buitrago del Lozoya"]
+
+# Caché ligera en memoria del catálogo de la CAM para evitar descargas repetidas (~15 MB) en clics sucesivos
+CAM_CACHE_TTL_SECONDS = int(os.getenv("CAM_CACHE_TTL_SECONDS", "600"))
+_CAM_API_CACHE: Dict[str, Any] = {
+    "timestamp": 0.0,
+    "records": [],
+    "only_relevant": True,
+}
+
+
+def _normalize_text(value: Any) -> str:
+    """Normaliza texto a mayúsculas ASCII sin tildes ni espacios redundantes."""
+    if value is None:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", str(value).strip())
+    without_accents = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return " ".join(without_accents.upper().split())
 
 
 def get_db_connection():
@@ -175,7 +196,7 @@ def detect_tiene_urgencias(
 ) -> bool:
     """
     Determina si un centro sanitario dispone de servicio de urgencias médicas /
-    atención continuada 24h (Hospitales, Centros de Salud cabecera con SAR/PAC/SUAP).
+    atención continuada 24h (Hospitales, oferta/horario de Urgencias o cabeceras SAR/PAC/SUAP).
     """
     if raw_urg is not None and str(raw_urg).strip() != "":
         val = str(raw_urg).strip().lower()
@@ -184,29 +205,21 @@ def detect_tiene_urgencias(
         if val in ("false", "0", "no", "n"):
             return False
 
-    combined = f"{tipo} {nombre} {horario}".upper()
-    mun_upper = (municipio or "").strip().upper()
+    combined_norm = _normalize_text(f"{tipo} {nombre} {horario}")
+    mun_norm = _normalize_text(municipio)
 
     if any(
-        k in combined
-        for k in (
-            "URGENCIAS",
-            "HOSPITAL",
-            "ATENCION CONTINUADA",
-            "ATENCIÓN CONTINUADA",
-            "24 HORAS",
-            "24H",
-            "SAR",
-            "SUAP",
-            "PAC",
-        )
+        k in combined_norm
+        for k in ("URGENCIAS", "HOSPITAL", "ATENCION CONTINUADA", "24 HORAS", "24H")
     ):
         return True
 
-    if "CENTRO DE SALUD" in combined:
+    if re.search(r"\b(?:SAR|SUAP|PAC)\b", combined_norm):
         return True
 
-    if "CONSULTORIO" in combined and mun_upper in SAR_24H_MUNICIPALITIES:
+    if (
+        "CENTRO DE SALUD" in combined_norm or "CONSULTORIO" in combined_norm
+    ) and mun_norm in SAR_24H_MUNICIPALITIES:
         # En el caso real de la Sección 7.2 (CS-28027 Buitrago del Lozoya y cabeceras SAR),
         # actúa como centro de urgencias de referencia de la comarca
         return True
@@ -356,7 +369,11 @@ def normalize_cam_record(raw: Dict[str, Any], only_relevant: bool = True) -> Opt
     ).strip()[:120]
 
     # Homologación con el caso de referencia de la Sección 7.2 (Buitrago del Lozoya -> CS-28027)
-    if "BUITRAGO" in municipio.upper() and ("CENTRO DE SALUD" in tipo.upper() or "CONSULTORIO" in tipo.upper()):
+    # Se exige igualdad exacta tras normalizar acentos para no colisionar con
+    # 'Gargantilla del Lozoya y Pinilla de Buitrago'.
+    if _normalize_text(municipio) == "BUITRAGO DEL LOZOYA" and (
+        "CENTRO DE SALUD" in _normalize_text(tipo) or "CONSULTORIO" in _normalize_text(tipo)
+    ):
         id_centro = "CS-28027"
         if not nombre_raw:
             nombre = "Consultorio Local Buitrago del Lozoya"
@@ -396,10 +413,11 @@ def discover_cam_sanidad_resource_urls(timeout: float = 8.0) -> List[Tuple[str, 
     except Exception:
         pass
 
-    # Priorizar formato JSON sobre CSV y añadir las URLs directas oficiales de respaldo
+    # Priorizar formato JSON sobre CSV y añadir las URLs directas oficiales de respaldo sin duplicados
     discovered.sort(key=lambda item: 0 if item[0] == "JSON" else 1)
-    discovered.append(("JSON", CAM_DIRECT_JSON_URL))
-    discovered.append(("CSV", CAM_DIRECT_CSV_URL))
+    for fallback in (("JSON", CAM_DIRECT_JSON_URL), ("CSV", CAM_DIRECT_CSV_URL)):
+        if fallback not in discovered:
+            discovered.append(fallback)
     return discovered
 
 
@@ -456,13 +474,24 @@ def parse_cam_csv_content(raw_bytes: Union[bytes, str], only_relevant: bool = Tr
 
 
 def fetch_cam_health_centers_api(
-    timeout: Optional[float] = None, only_relevant: bool = True
+    timeout: Optional[float] = None,
+    only_relevant: bool = True,
+    force_refresh: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Realiza la petición HTTP GET directamente al Portal de Datos Abiertos de la
     Comunidad de Madrid (vía descubrimiento CKAN y descarga JSON/CSV) y retorna
     la lista de centros sanitarios normalizados y geocodificados en WGS84.
+    Utiliza una caché en memoria (TTL configurable) salvo que `force_refresh=True`.
     """
+    if (
+        not force_refresh
+        and _CAM_API_CACHE["records"]
+        and _CAM_API_CACHE.get("only_relevant") == only_relevant
+        and (time.time() - float(_CAM_API_CACHE["timestamp"])) < CAM_CACHE_TTL_SECONDS
+    ):
+        return [dict(c) for c in _CAM_API_CACHE["records"]]
+
     req_timeout = timeout or float(os.getenv("EXTERNAL_API_TIMEOUT", "10"))
     candidate_urls = discover_cam_sanidad_resource_urls(timeout=req_timeout)
 
@@ -483,6 +512,9 @@ def fetch_cam_health_centers_api(
                 records = parse_cam_csv_content(resp.content, only_relevant=only_relevant)
 
             if records:
+                _CAM_API_CACHE["timestamp"] = time.time()
+                _CAM_API_CACHE["records"] = [dict(c) for c in records]
+                _CAM_API_CACHE["only_relevant"] = only_relevant
                 print(
                     f"{GREEN}[ETL P3-CAM] Recibidos y normalizados {len(records)} centros sanitarios "
                     f"asistenciales desde la API oficial de la CAM.{RESET}"
@@ -566,34 +598,78 @@ def upsert_health_centers_to_db(centers: List[Dict[str, Any]], conn=None) -> Tup
             conn.close()
 
 
-def ingest_centros_for_municipio(municipio_nombre: str, conn=None) -> int:
+def ingest_centros_for_municipio(
+    municipio_nombre: str,
+    conn=None,
+    force_refresh: bool = False,
+) -> int:
     """
     Filtra e ingesta bajo demanda los centros sanitarios de un municipio específico
-    (más los centros de urgencias de referencia de la comarca) desde la API de la CAM.
+    desde la API de la CAM. Solo incluye la red de urgencias si la tabla en BD
+    aún no contiene ningún centro con urgencias.
     """
-    all_centers = fetch_cam_health_centers_api()
-    target_mun = municipio_nombre.strip().upper()
-    filtered = [
-        c
-        for c in all_centers
-        if target_mun in (c.get("municipio_nombre") or "").upper() or c.get("tiene_urgencias")
-    ]
-    inserted, _ = upsert_health_centers_to_db(filtered, conn=conn)
-    return inserted
+    own_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        own_conn = True
+
+    try:
+        include_urgencias = False
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM centros_sanitarios WHERE tiene_urgencias = TRUE;"
+                )
+                row = cur.fetchone()
+                if row is not None and isinstance(row[0], int) and row[0] == 0:
+                    include_urgencias = True
+        except Exception:
+            include_urgencias = False
+
+        all_centers = fetch_cam_health_centers_api(force_refresh=force_refresh)
+        target_mun = _normalize_text(municipio_nombre)
+        filtered = [
+            c
+            for c in all_centers
+            if _normalize_text(c.get("municipio_nombre")) == target_mun
+            or (include_urgencias and bool(c.get("tiene_urgencias")))
+        ]
+        if not filtered:
+            return 0
+
+        inserted, _ = upsert_health_centers_to_db(filtered, conn=conn)
+        return inserted
+    finally:
+        if own_conn:
+            conn.close()
 
 
-def run_etl_p3() -> str:
+def run_etl_p3(seed_municipios: Optional[List[str]] = None) -> str:
     """
-    Ejecuta el pipeline completo ETL P3 conectándose a la API de Datos Abiertos de la CAM
-    y almacenando los centros sanitarios con geometría PostGIS en `centros_sanitarios`.
+    Ejecuta la carga semilla inicial ligera del ETL P3 conectándose a la API de Datos
+    Abiertos de la CAM: inserta la red base de urgencias (`tiene_urgencias = True`) y los
+    consultorios de los municipios semilla; los consultorios locales del resto de municipios
+    se hidratan bajo demanda desde el backend.
     """
+    target_seeds = DEFAULT_SEED_MUNICIPIOS if seed_municipios is None else seed_municipios
+    seed_set = {_normalize_text(m) for m in target_seeds if m}
+
     centers = fetch_cam_health_centers_api()
-    inserted_count, urgencias_count = upsert_health_centers_to_db(centers)
+    seed_centers = [
+        c
+        for c in centers
+        if bool(c.get("tiene_urgencias"))
+        or _normalize_text(c.get("municipio_nombre")) in seed_set
+    ]
+    inserted_count, urgencias_count = upsert_health_centers_to_db(seed_centers)
     print(
-        f"{GREEN}[ETL P3-CAM] Geocodificando centros de salud desde API CAM... OK. "
-        f"({inserted_count} centros registrados, {urgencias_count} con Urgencias){RESET}"
+        f"{GREEN}[ETL P3-CAM] Carga semilla desde API CAM... OK. "
+        f"({inserted_count} centros registrados, {urgencias_count} con Urgencias; resto bajo demanda){RESET}"
     )
-    return f"{inserted_count} centros sanitarios geocodificados ({urgencias_count} con Urgencias)"
+    return (
+        f"{inserted_count} centros sanitarios semilla ({urgencias_count} con Urgencias; "
+        f"resto bajo demanda)"
+    )
 
 
 if __name__ == "__main__":
