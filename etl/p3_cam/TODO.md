@@ -1,19 +1,23 @@
 # 📋 TODO List — Módulo ETL P3: API Datos Abiertos CAM (`etl/p3_cam/`)
 
-> **Responsable:** Desarrollador P3
+> **Responsable:** Desarrollador P3 (Rama `P3` — **COMPLETADO**)
 > **Fuente Pública Oficial (Sección 3 y 6.2.3):** Portal de Datos Abiertos de la Comunidad de Madrid — *Catálogo de Centros, Servicios y Establecimientos Sanitarios*.
-> **Archivo a completar:** `etl_sanidad.py`
+> **Archivos implementados:** `etl/p3_cam/etl_sanidad.py`, `db/schema.sql` (tabla `centros_sanitarios`), `backend/services/p3_health_service.py`, `backend/models/domain.py` (`CentroSanitario`), `backend/schemas/domain.py` (`CentroSanitarioSchema`, `RutaSanitariaSchema`), `tests/test_p3_sanidad.py`
 
-## Paso a Paso para Completar `etl_sanidad.py`
+## Estado de Desarrollo en la Rama `P3`
 
-- [ ] **Paso 1: Implementar `get_db_connection()`**
-  - Conectar a PostgreSQL usando `psycopg2`.
+- [x] **Paso 1: Implementar `get_db_connection()`**
+  - Conecta a PostgreSQL/PostGIS usando `psycopg2` mediante variables de entorno (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`).
 
-- [ ] **Paso 2: Implementar `fetch_cam_health_centers_api()` (Conexión directa a API de la CAM)**
-  - Hacer una petición `requests.get(...)` al recurso JSON/CSV de la API de Datos Abiertos de la Comunidad de Madrid.
-  - Filtrar los centros asistenciales (Hospitales, Centros de Salud, Consultorios Locales y Puntos de Atención Continuada / Urgencias).
-  - Si las coordenadas del portal de la CAM vienen proyectadas en UTM ETRS89 (`EPSG:25830`), transformarlas a `EPSG:4326` (o usar directamente `ST_Transform(ST_SetSRID(ST_MakePoint(x, y), 25830), 4326)` en PostGIS al insertar).
+- [x] **Paso 2: Implementar `fetch_cam_health_centers_api()` (Conexión directa a API de la CAM)**
+  - Descubre dinámicamente los recursos JSON y CSV desde la API CKAN de Datos Abiertos de la Comunidad de Madrid (`package_show?id=centros_servicios_establecimientos_sanitarios`) y descarga los 46.000+ registros oficiales filtrando y consolidando los **548 centros sanitarios asistenciales únicos** (Hospitales, Centros de Salud, Consultorios de Atención Primaria y Puntos de Urgencias/SAR).
+  - Reproyecta las coordenadas `localizacion_coordenada_x` y `localizacion_coordenada_y` desde UTM Huso 30N ETRS89 (`EPSG:25830`) a WGS84 (`EPSG:4326`) mediante `utm30n_etrs89_to_wgs84()`.
 
-- [ ] **Paso 3: Implementar `run_etl_p3()`**
-  - Insertar los centros devueltos por la API en la tabla `centros_sanitarios` con `ON CONFLICT (id_centro) DO UPDATE`.
-  - Imprimir: `[ETL P3-CAM] Geocodificando centros de salud desde API CAM... OK.`
+- [x] **Paso 3: Implementar `upsert_health_centers_to_db()` y `run_etl_p3()`**
+  - Inserta los centros en la tabla `centros_sanitarios` con `ON CONFLICT (id_centro) DO UPDATE` y genera la geometría espacial `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)`.
+  - Incluye `ingest_centros_for_municipio()` para hidratación selectiva bajo demanda.
+
+- [x] **Paso 4: Implementar Servicio Espacial KNN PostGIS y Pruebas Unitarias**
+  - Consultas espaciales `CROSS JOIN LATERAL` con operador KNN `<->` y cálculo `ST_DistanceSphere` implementadas en `backend/services/p3_health_service.py`.
+  - Suite de 10 pruebas unitarias y de integración en vivo (`tests/test_p3_sanidad.py`) ejecutada con éxito.
+

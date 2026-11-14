@@ -1,4 +1,5 @@
 from schemas.domain import (
+    CentroSanitarioSchema,
     ConvocatoriaMunicipioItemSchema,
     DemografiaPuntoAnualSchema,
     DemografiaSerieResponseSchema,
@@ -12,6 +13,7 @@ from schemas.domain import (
 __all__ = [
     "WLCBreakdownSchema",
     "InfraestructuraSchema",
+    "CentroSanitarioSchema",
     "RutaSanitariaSchema",
     "ConvocatoriaMunicipioItemSchema",
     "MunicipioListItemSchema",
@@ -19,3 +21,4 @@ __all__ = [
     "DemografiaPuntoAnualSchema",
     "DemografiaSerieResponseSchema",
 ]
+

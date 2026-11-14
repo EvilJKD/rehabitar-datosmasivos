@@ -9,7 +9,7 @@
 
 ## Paso a Paso para Completar `db/schema.sql`
 
-- [ ] **Paso 1: Habilitar la extensión espacial PostGIS**
+- [x] **Paso 1: Habilitar la extensión espacial PostGIS**
   - Escribir `CREATE EXTENSION IF NOT EXISTS postgis;`.
 
 - [ ] **Paso 2 (P1): Crear la tabla maestra `municipios` (Sección 7.1.1 - *Reference Table*)**
@@ -48,7 +48,7 @@
   - Crear índice parcial para la **Consulta 1**:
     `CREATE INDEX IF NOT EXISTS idx_infra_cobertura_fibra ON metricas_infraestructura (cobertura_fibra_pct) WHERE cobertura_fibra_pct > 0;`.
 
-- [ ] **Paso 5 (P3): Crear la tabla `centros_sanitarios` (Sección 7.1.4 - *Reference Table*)**
+- [x] **Paso 5 (P3): Crear la tabla `centros_sanitarios` (Sección 7.1.4 - *Reference Table*)**
   - Columnas:
     - `id_centro VARCHAR(40) PRIMARY KEY` (ej. `'CS-28027'`)
     - `nombre VARCHAR(200) NOT NULL`
