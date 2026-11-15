@@ -2,24 +2,35 @@
 Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la Propuesta.
 """
 
-from pydantic import BaseModel
+from typing import Dict, List, Optional
+
+try:
+    from pydantic import BaseModel, Field
+except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en host sin pydantic
+
+    class BaseModel:  # type: ignore
+        def __init__(self, **data):
+            for k, v in data.items():
+                setattr(self, k, v)
+
+    def Field(default=None, **kwargs):  # type: ignore
+        return default
 
 
 class WLCBreakdownSchema(BaseModel):
     """
-    TODO (Responsable P5 - Sección 4 y 6.4):
-    Desglose pormenorizado de los 5 parámetros de habitabilidad (0 a 100):
-    - indice_wlc: float (Puntuación de Viabilidad Global 0-100, ej. 96.05 en Madarcos)
-    - semaforo: str ('VERDE', 'AMBAR', 'ROJO' o 'PENDIENTE')
-    - etiqueta_viabilidad: str
-    - score_acceso_carretera: float       (Indicador 1: Acceso por carretera asfaltada)
-    - score_proximidad_sanitaria: float   (Indicador 2: Proximidad a urgencias en minutos CartoCiudad)
-    - score_conectividad_digital: float   (Indicador 3: Fibra óptica + móvil)
-    - score_acceso_hidrico: float         (Indicador 4: Cercanía a recursos hídricos)
-    - score_inercia_demografica: float    (Indicador 5: Variación demográfica a 10 años)
-    - pesos_aplicados: dict
+    Responsable P5 - Sección 4, 6.4 y 7.3:
+    Desglose pormenorizado de los 5 parámetros de habitabilidad (0 a 100).
     """
-    pass
+    indice_wlc: float = Field(..., description="Puntuación de Viabilidad Global 0-100 (ej. 96.05 en Madarcos)")
+    semaforo: str = Field(..., description="VERDE, AMBAR, ROJO o PENDIENTE")
+    etiqueta_viabilidad: str = Field(..., description="Etiqueta descriptiva de viabilidad")
+    score_acceso_carretera: float = Field(..., description="Indicador 1: Acceso por carretera asfaltada")
+    score_proximidad_sanitaria: float = Field(..., description="Indicador 2: Proximidad a urgencias (CartoCiudad)")
+    score_conectividad_digital: float = Field(..., description="Indicador 3: Fibra óptica FTTH + móvil")
+    score_acceso_hidrico: float = Field(..., description="Indicador 4: Cercanía a recursos hídricos")
+    score_inercia_demografica: float = Field(..., description="Indicador 5: Inercia demográfica a 10 años")
+    pesos_aplicados: Dict[str, float] = Field(..., description="Ponderaciones normalizadas aplicadas")
 
 
 class InfraestructuraSchema(BaseModel):
@@ -36,21 +47,23 @@ class InfraestructuraSchema(BaseModel):
 
 class RutaSanitariaSchema(BaseModel):
     """
-    TODO (Responsables P3 y P5 - Consulta 2 y Sección 7.3):
-    Resultado de la fusión en tiempo real entre KNN PostGIS y API CartoCiudad:
-    - id_centro: str (ej. 'CS-28027')
-    - nombre: str (ej. 'Consultorio Local Buitrago del Lozoya')
-    - tipo: str (ej. 'Centro de Salud / Urgencias')
-    - tiene_urgencias: bool
-    - latitud: float
-    - longitud: float
-    - distancia_euclidea_km: float (KNN PostGIS)
-    - distancia_carretera_km: float (En tiempo real desde CartoCiudad, ej. 11.4 km)
-    - tiempo_estimado_min: float (En tiempo real desde CartoCiudad, ej. 12.2 min)
-    - fuente_ruta: str ('API CartoCiudad IGN (Tiempo Real)' o 'Fallback Haversine')
-    - geometria_ruta: List[List[float]]
+    Responsables P3 y P5 - Consulta 2 y Sección 7.3:
+    Resultado de la fusión en tiempo real entre KNN PostGIS y API CartoCiudad.
     """
-    pass
+    id_centro: str = Field(..., description="Identificador del centro sanitario (ej. 'CS-28027')")
+    nombre: str = Field(..., description="Nombre del centro (ej. 'Consultorio Local Buitrago del Lozoya')")
+    tipo: str = Field(..., description="Tipología del centro (ej. 'Centro de Salud / Urgencias')")
+    tiene_urgencias: bool = Field(default=False, description="Indica si cuenta con servicio de urgencias")
+    latitud: float = Field(..., description="Latitud WGS84 del centro")
+    longitud: float = Field(..., description="Longitud WGS84 del centro")
+    distancia_euclidea_km: float = Field(..., description="Distancia en línea recta obtenida por KNN PostGIS (km)")
+    distancia_carretera_km: float = Field(..., description="Distancia real por carretera CartoCiudad (km)")
+    tiempo_estimado_min: float = Field(..., description="Tiempo estimado en coche CartoCiudad (min)")
+    fuente_ruta: str = Field(..., description="'API CartoCiudad IGN (Tiempo Real)' o 'Fallback Haversine (45 km/h)'")
+    geometria_ruta: List[List[float]] = Field(
+        default_factory=list,
+        description="Polilínea [[lat, lon], ...] hacia el centro de urgencias",
+    )
 
 
 class ConvocatoriaMunicipioItemSchema(BaseModel):

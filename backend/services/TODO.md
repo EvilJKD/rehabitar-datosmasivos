@@ -31,15 +31,15 @@ Cada servicio implementa las consultas y reglas descritas en las **Secciones 4, 
 
 ---
 
-## 5. Desarrollador P5 — `p5_cartociudad.py` y `p5_wlc_engine.py` (Consulta 1, Consulta 2 y Fusión en Memoria)
-- [ ] **En `p5_cartociudad.py` (Sección 6.3 y 7.3 - Integración Virtual en Tiempo Real)**:
-  - Implementar `calculate_route_cartociudad(lat_orig, lon_orig, lat_dest, lon_dest)` (con fallback `compute_fallback_route` Haversine a 45 km/h).
-  - **Regla de Oro (Sección 7.3):** NO almacenar el tiempo de viaje ni la ruta en ninguna tabla de PostgreSQL; devolverlos en memoria para la **Consulta 2** y para alimentar el motor WLC.
-- [ ] **En `p5_wlc_engine.py` (Sección 4 y Diagrama Sección 9 - Motor WLC en Memoria)**:
-  - Implementar los **5 indicadores de habitabilidad (0-100)**:
+## 5. Desarrollador P5 — `p5_cartociudad.py` y `p5_wlc_engine.py` (Consulta 1, Consulta 2 y Fusión en Memoria) — **COMPLETADO EN RAMA `P5`**
+- [x] **En `p5_cartociudad.py` (Sección 6.3 y 7.3 - Integración Virtual en Tiempo Real)**:
+  - Implementados `haversine_km`, `build_curved_mountain_polyline`, `compute_fallback_route` (factor 1.32x a 45 km/h) y `calculate_route_cartociudad` (API CartoCiudad IGN con caché efímera en memoria RAM y fallback automático).
+  - **Regla de Oro (Sección 7.3):** NO almacena el tiempo de viaje ni la ruta en ninguna tabla de PostgreSQL; devuelve los datos en memoria para la **Consulta 2** y para alimentar el motor WLC.
+- [x] **En `p5_wlc_engine.py` (Sección 4 y Diagrama Sección 9 - Motor WLC en Memoria)**:
+  - Implementados los **5 indicadores de habitabilidad (0-100)**:
     1. `compute_acceso_carretera_score(distancia_carretera_km)` (Peso Global 25% / PoC 40%)
     2. `compute_proximidad_sanitaria_score(tiempo_conduccion_min)` ($\le 15$ min = 100 pts, decae hasta 45 min; Peso Global 20% / PoC 30%)
     3. `compute_conectividad_digital_score(cobertura_fibra_pct, cobertura_movil_pct)` (Peso Global 20%)
     4. `compute_acceso_hidrico_score(distancia_recurso_hidrico_km)` (Peso Global 15%)
     5. `compute_inercia_demografica_score(poblacion_actual, variacion_10a_pct)` (Peso Global 20% / PoC 30%)
-  - Implementar `evaluate_wlc_for_municipio(...)` que fusiona en memoria los indicadores y permite responder la **Consulta 1 (Sección 6.5)**: identificar municipios con `WLC > 75` y cobertura de fibra óptica.
+  - Implementados `evaluate_wlc_for_municipio(...)` (con modos `GLOBAL_5`, `POC_3` y `custom_weights`) y `filter_viable_municipios_c1(...)` para responder la **Consulta 1 (Sección 6.5)**: identificar municipios con `WLC >= 75` y cobertura de fibra óptica.
