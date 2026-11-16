@@ -2,19 +2,44 @@
 Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la Propuesta.
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     from pydantic import BaseModel, Field
 except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en host sin pydantic
 
+    class _DefaultFactory:
+        def __init__(self, factory: Callable[[], Any]):
+            self.factory = factory
+
     class BaseModel:  # type: ignore
-        def __init__(self, **data):
+        def __init__(self, **data: Any):
+            for cls in reversed(type(self).__mro__):
+                if cls is object or cls is BaseModel:
+                    continue
+                for attr_name, attr_val in cls.__dict__.items():
+                    if attr_name.startswith("_"):
+                        continue
+                    if isinstance(attr_val, _DefaultFactory):
+                        setattr(self, attr_name, attr_val.factory())
             for k, v in data.items():
                 setattr(self, k, v)
 
-    def Field(default=None, **kwargs):  # type: ignore
-        return default
+        def model_dump(self) -> Dict[str, Any]:
+            return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+
+        def dict(self) -> Dict[str, Any]:
+            return self.model_dump()
+
+    def Field(  # type: ignore
+        default: Any = None,
+        *,
+        default_factory: Optional[Callable[[], Any]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        if default_factory is not None:
+            return _DefaultFactory(default_factory)
+        return None if default is Ellipsis else default
 
 
 class WLCBreakdownSchema(BaseModel):

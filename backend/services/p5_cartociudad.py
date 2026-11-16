@@ -10,6 +10,7 @@ de CartoCiudad, fusionando estos valores en memoria con el motor WLC."
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -121,6 +122,9 @@ def _to_leaflet_latlon(coord_x: float, coord_y: float) -> List[float]:
 
 def _decode_encoded_polyline(encoded: str, precision: int = 5) -> List[List[float]]:
     """Decodifica una cadena Google Encoded Polyline (precision 1e-5 usada por CartoCiudad IGN)."""
+    if not isinstance(encoded, str) or not encoded:
+        return []
+
     points: List[List[float]] = []
     index = 0
     lat = 0
@@ -135,8 +139,11 @@ def _decode_encoded_polyline(encoded: str, precision: int = 5) -> List[List[floa
                 result = 0
                 while True:
                     if index >= length:
-                        return points if len(points) >= 2 else []
-                    byte = ord(encoded[index]) - 63
+                        return []
+                    raw_ord = ord(encoded[index])
+                    if raw_ord < 63 or raw_ord > 126:
+                        return []
+                    byte = raw_ord - 63
                     index += 1
                     result |= (byte & 0x1F) << shift
                     shift += 5
@@ -150,20 +157,21 @@ def _decode_encoded_polyline(encoded: str, precision: int = 5) -> List[List[floa
 
             lat_val = round(lat / factor, 6)
             lon_val = round(lng / factor, 6)
-            if not (-90.0 <= lat_val <= 90.0 and -180.0 <= lon_val <= 180.0):
+            # Validar ámbito geográfico coherente para España (Península, Baleares, Canarias, Ceuta/Melilla)
+            if not (27.0 <= lat_val <= 45.0 and -19.0 <= lon_val <= 6.0):
                 return []
             points.append([lat_val, lon_val])
     except (IndexError, TypeError, ValueError):
         return []
 
-    return points
+    return points if len(points) >= 2 else []
 
 
 def _parse_cartociudad_geometry(raw_geom: Any) -> List[List[float]]:
     """
     Extrae una polilínea `[[lat, lon], ...]` desde la geometría devuelta por CartoCiudad
     soportando Encoded Polyline (`geom` de IGN), WKT (`LINESTRING` / `MULTILINESTRING`),
-    diccionario GeoJSON o lista de puntos.
+    diccionario o cadena GeoJSON y listas de puntos.
     """
     if not raw_geom:
         return []
@@ -171,40 +179,59 @@ def _parse_cartociudad_geometry(raw_geom: Any) -> List[List[float]]:
     if isinstance(raw_geom, dict):
         gtype = str(raw_geom.get("type") or "").upper()
         coords = raw_geom.get("coordinates")
-        if gtype == "MULTILINESTRING" and isinstance(coords, list):
-            flat: List[List[float]] = []
-            for segment in coords:
-                if isinstance(segment, list):
-                    for pt in segment:
-                        if isinstance(pt, (list, tuple)) and len(pt) >= 2:
-                            flat.append(_to_leaflet_latlon(pt[0], pt[1]))
-            return flat
-        if isinstance(coords, list):
-            return [
-                _to_leaflet_latlon(pt[0], pt[1])
-                for pt in coords
-                if isinstance(pt, (list, tuple)) and len(pt) >= 2
-            ]
+        try:
+            if gtype == "MULTILINESTRING" and isinstance(coords, list):
+                flat: List[List[float]] = []
+                for segment in coords:
+                    if isinstance(segment, list):
+                        for pt in segment:
+                            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                                flat.append(_to_leaflet_latlon(pt[0], pt[1]))
+                return flat
+            if isinstance(coords, list):
+                return [
+                    _to_leaflet_latlon(pt[0], pt[1])
+                    for pt in coords
+                    if isinstance(pt, (list, tuple)) and len(pt) >= 2
+                ]
+        except (TypeError, ValueError):
+            return []
         return []
 
     if isinstance(raw_geom, list):
         parsed: List[List[float]] = []
-        for pt in raw_geom:
-            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
-                x, y = float(pt[0]), float(pt[1])
-                # Detectar si el par ya viene en [lat, lon] para España/Madrid vs [lon, lat]
-                if 25.0 <= x <= 55.0 and -20.0 <= y <= 10.0:
-                    parsed.append([round(x, 6), round(y, 6)])
-                else:
-                    parsed.append(_to_leaflet_latlon(x, y))
+        try:
+            for pt in raw_geom:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    x, y = float(pt[0]), float(pt[1])
+                    # Detectar si el par ya viene en [lat, lon] para España/Madrid vs [lon, lat]
+                    if 25.0 <= x <= 55.0 and -20.0 <= y <= 10.0:
+                        parsed.append([round(x, 6), round(y, 6)])
+                    else:
+                        parsed.append(_to_leaflet_latlon(x, y))
+        except (TypeError, ValueError):
+            return []
         return parsed
 
     if isinstance(raw_geom, str):
-        upper_geom = raw_geom.upper()
-        if "LINESTRING" in upper_geom or ("(" in raw_geom and " " in raw_geom):
-            pairs = re.findall(r"(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)", raw_geom)
-            return [_to_leaflet_latlon(float(lon_s), float(lat_s)) for lon_s, lat_s in pairs]
-        return _decode_encoded_polyline(raw_geom.strip())
+        stripped = raw_geom.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                decoded_json = json.loads(stripped)
+            except ValueError:
+                return []
+            if not isinstance(decoded_json, str):
+                return _parse_cartociudad_geometry(decoded_json)
+            return []
+
+        upper_geom = stripped.upper()
+        if "LINESTRING" in upper_geom or ("(" in stripped and " " in stripped):
+            pairs = re.findall(r"(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)", stripped)
+            try:
+                return [_to_leaflet_latlon(float(lon_s), float(lat_s)) for lon_s, lat_s in pairs]
+            except ValueError:
+                return []
+        return _decode_encoded_polyline(stripped)
 
     return []
 
@@ -220,8 +247,11 @@ def _parse_cartociudad_payload(
     if not isinstance(payload, dict) or payload.get("found") is False:
         return None
 
-    raw_dist = payload.get("distance") or payload.get("distancia")
-    raw_time = payload.get("time") or payload.get("tiempo")
+    uses_native_dist = payload.get("distance") is not None
+    uses_native_time = payload.get("time") is not None
+
+    raw_dist = payload["distance"] if uses_native_dist else payload.get("distancia")
+    raw_time = payload["time"] if uses_native_time else payload.get("tiempo")
     if raw_dist is None or raw_time is None:
         return None
 
@@ -231,11 +261,21 @@ def _parse_cartociudad_payload(
     except (TypeError, ValueError):
         return None
 
-    if dist_val <= 0.0 or time_val <= 0.0:
+    if dist_val < 0.0 or time_val < 0.0:
         return None
 
-    dist_km = dist_val / 1000.0 if dist_val > 200.0 else dist_val
-    if time_val > 10000.0:
+    dist_eucl_km = haversine_km(lat_orig, lon_orig, lat_dest, lon_dest)
+    if (dist_val == 0.0 or time_val == 0.0) and dist_eucl_km > 0.05:
+        return None
+
+    if uses_native_dist:
+        dist_km = dist_val / 1000.0
+    else:
+        dist_km = dist_val / 1000.0 if dist_val > 200.0 else dist_val
+
+    if uses_native_time:
+        time_min = time_val / 60000.0
+    elif time_val > 10000.0:
         time_min = time_val / 60000.0
     elif time_val > 180.0:
         time_min = time_val / 60.0
@@ -251,7 +291,7 @@ def _parse_cartociudad_payload(
         )
 
     return {
-        "distancia_euclidea_km": haversine_km(lat_orig, lon_orig, lat_dest, lon_dest),
+        "distancia_euclidea_km": dist_eucl_km,
         "distancia_carretera_km": round(dist_km, 2),
         "tiempo_estimado_min": round(time_min, 2),
         "fuente_ruta": "API CartoCiudad IGN (Tiempo Real)",

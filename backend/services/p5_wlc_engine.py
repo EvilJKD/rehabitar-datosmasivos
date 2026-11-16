@@ -112,31 +112,78 @@ def _resolve_weights(
     custom_weights: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
     """Selecciona y normaliza a suma 1.0 el diccionario de ponderaciones de los 5 indicadores."""
-    if custom_weights:
-        aliases = {
-            "carretera": ("carretera", "w_carretera", "acceso_carretera"),
-            "sanidad": ("sanidad", "w_sanidad", "w_health", "proximidad_sanitaria"),
-            "conectividad": ("conectividad", "w_conectividad", "w_infra", "conectividad_digital"),
-            "hidrico": ("hidrico", "w_hidrico", "acceso_hidrico"),
-            "demografia": ("demografia", "w_demografia", "w_demo", "inercia_demografica"),
-        }
-        raw: Dict[str, float] = {}
-        for canonical_key, candidate_names in aliases.items():
-            val = 0.0
-            for alias in candidate_names:
-                if alias in custom_weights and custom_weights[alias] is not None:
-                    val = max(0.0, float(custom_weights[alias]))
-                    break
-            raw[canonical_key] = val
-
-        total = sum(raw.values())
-        if total > 0.0:
-            return {k: v / total for k, v in raw.items()}
-
     modo_norm = (modo_pesos or "GLOBAL_5").strip().upper()
-    if modo_norm in ("POC_3", "POC", "POC3"):
-        return dict(WEIGHTS_POC_3)
-    return dict(WEIGHTS_GLOBAL_5)
+    base_weights = dict(
+        WEIGHTS_POC_3 if modo_norm in ("POC_3", "POC", "POC3") else WEIGHTS_GLOBAL_5
+    )
+
+    if not custom_weights:
+        return base_weights
+
+    aliases = {
+        "carretera": ("carretera", "w_carretera", "acceso_carretera"),
+        "sanidad": ("sanidad", "w_sanidad", "w_health", "proximidad_sanitaria"),
+        "conectividad": ("conectividad", "w_conectividad", "conectividad_digital"),
+        "hidrico": ("hidrico", "w_hidrico", "acceso_hidrico"),
+        "demografia": ("demografia", "w_demografia", "w_demo", "inercia_demografica"),
+    }
+
+    raw: Dict[str, Optional[float]] = {}
+    for canonical_key, candidate_names in aliases.items():
+        val: Optional[float] = None
+        for alias in candidate_names:
+            if alias in custom_weights and custom_weights[alias] is not None:
+                val = max(0.0, float(custom_weights[alias]))
+                break
+        raw[canonical_key] = val
+
+    # Soporte para parámetro legado `w_infra` / `infra` de backend/main.py:
+    # Si llega `w_infra` sin desglose específico, se reparte proporcionalmente entre
+    # los 3 pilares físicos/digitales (carretera 25%, conectividad 20%, hídrico 15%).
+    legacy_infra = custom_weights.get("w_infra", custom_weights.get("infra"))
+    if legacy_infra is not None:
+        infra_val = max(0.0, float(legacy_infra))
+        if raw["carretera"] is None and raw["hidrico"] is None:
+            infra_base_total = (
+                WEIGHTS_GLOBAL_5["carretera"]
+                + WEIGHTS_GLOBAL_5["conectividad"]
+                + WEIGHTS_GLOBAL_5["hidrico"]
+            )
+            raw["carretera"] = infra_val * (WEIGHTS_GLOBAL_5["carretera"] / infra_base_total)
+            raw["conectividad"] = (
+                infra_val * (WEIGHTS_GLOBAL_5["conectividad"] / infra_base_total)
+                if raw["conectividad"] is None
+                else raw["conectividad"]
+            )
+            raw["hidrico"] = infra_val * (WEIGHTS_GLOBAL_5["hidrico"] / infra_base_total)
+        elif raw["conectividad"] is None:
+            raw["conectividad"] = infra_val
+
+    specified_keys = [k for k, v in raw.items() if v is not None]
+    if not specified_keys:
+        return base_weights
+
+    unspecified_keys = [k for k, v in raw.items() if v is None]
+    specified_sum = sum(float(raw[k]) for k in specified_keys)
+
+    resolved: Dict[str, float] = {
+        k: float(raw[k]) if raw[k] is not None else 0.0 for k in raw
+    }
+
+    # Si solo se enviaron algunos pesos parciales (< 1.0), distribuir el presupuesto
+    # restante proporcionalmente entre los indicadores no especificados según `base_weights`.
+    if unspecified_keys and specified_sum < (1.0 - 1e-9):
+        remaining_budget = 1.0 - specified_sum
+        base_unspecified_sum = sum(base_weights[k] for k in unspecified_keys)
+        if base_unspecified_sum > 0.0:
+            for k in unspecified_keys:
+                resolved[k] = remaining_budget * (base_weights[k] / base_unspecified_sum)
+
+    total = sum(resolved.values())
+    if total > 0.0:
+        return {k: v / total for k, v in resolved.items()}
+
+    return base_weights
 
 
 def evaluate_wlc_for_municipio(
@@ -203,37 +250,48 @@ def evaluate_wlc_for_municipio(
     }
 
 
+def _get_field(obj: Any, key: str) -> Any:
+    """Extrae un campo tanto de un diccionario como de un objeto o schema Pydantic."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _extract_wlc_score(item: Any) -> Optional[float]:
+    """Obtiene el índice WLC desde `item.wlc.indice_wlc` o `item.indice_wlc`."""
+    wlc_obj = _get_field(item, "wlc")
+    raw_sub = _get_field(wlc_obj, "indice_wlc")
+    raw_top = _get_field(item, "indice_wlc")
+    raw_val = raw_sub if raw_sub is not None else raw_top
+    return None if raw_val is None else float(raw_val)
+
+
 def filter_viable_municipios_c1(
-    municipios: List[Dict[str, Any]],
+    municipios: List[Any],
     min_wlc: float = 75.0,
     requiere_fibra: bool = True,
     min_fibra_pct: float = 50.0,
-) -> List[Dict[str, Any]]:
+) -> List[Any]:
     """
     Resuelve en memoria la Consulta 1 (Sección 6.5):
     Filtra los municipios con Índice WLC superior/igual al umbral (`min_wlc`, por defecto 75)
     y con cobertura de fibra óptica suficiente cuando `requiere_fibra=True`.
+    Soporta tanto diccionarios como instancias de schemas (`MunicipioListItemSchema`, `WLCBreakdownSchema`).
     Ordena los resultados de mayor a menor puntuación WLC.
     """
-    viables: List[Dict[str, Any]] = []
+    viables: List[Any] = []
     for item in municipios:
-        wlc_obj = item.get("wlc") if isinstance(item.get("wlc"), dict) else {}
-        raw_wlc = wlc_obj.get("indice_wlc", item.get("indice_wlc"))
-        if raw_wlc is None:
-            continue
-        wlc_score = float(raw_wlc)
-        if wlc_score < float(min_wlc):
+        wlc_score = _extract_wlc_score(item)
+        if wlc_score is None or wlc_score < float(min_wlc):
             continue
 
         if requiere_fibra:
-            infra_obj = (
-                item.get("infraestructura")
-                if isinstance(item.get("infraestructura"), dict)
-                else {}
-            )
-            raw_fibra = item.get(
-                "cobertura_fibra_pct", infra_obj.get("cobertura_fibra_pct")
-            )
+            raw_fibra_top = _get_field(item, "cobertura_fibra_pct")
+            infra_obj = _get_field(item, "infraestructura")
+            raw_fibra_sub = _get_field(infra_obj, "cobertura_fibra_pct")
+            raw_fibra = raw_fibra_top if raw_fibra_top is not None else raw_fibra_sub
             fibra_pct = float(raw_fibra) if raw_fibra is not None else 0.0
             if min_fibra_pct <= 0.0:
                 if fibra_pct <= 0.0:
@@ -244,9 +302,7 @@ def filter_viable_municipios_c1(
         viables.append(item)
 
     viables.sort(
-        key=lambda m: float(
-            (m.get("wlc") or {}).get("indice_wlc", m.get("indice_wlc", 0.0))
-        ),
+        key=lambda m: _extract_wlc_score(m) or 0.0,
         reverse=True,
     )
     return viables

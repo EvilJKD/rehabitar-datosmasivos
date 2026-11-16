@@ -8,6 +8,7 @@ Ejecución:
     python -m unittest discover -s re-habitar-poc/tests -p "test_p5_wlc_and_cartociudad.py" -v
 """
 
+import json
 import os
 import sys
 import unittest
@@ -179,6 +180,81 @@ class TestP5CartoCiudadService(unittest.IsolatedAsyncioTestCase):
         if route["fuente_ruta"] == "API CartoCiudad IGN (Tiempo Real)":
             self.assertGreater(len(route["geometria_ruta"]), 20)
 
+    async def test_cartociudad_edge_cases_short_zero_geojson_and_invalid_strings(self):
+        """
+        Pruebas de regresión de auditoría P5.1:
+        - Rutas cortas intra-municipales (<= 200 m / <= 10 s) en metros y milisegundos.
+        - Rutas de distancia/tiempo 0.0 cuando origen y destino coinciden (y rechazo si distan > 50 m).
+        - Parseo de cadenas JSON GeoJSON serializadas.
+        - Rechazo de cadenas no válidas (`INVALID_GEOM`, `123456`) para evitar coordenadas (0, 0).
+        """
+        short_payload = {
+            "found": True,
+            "distance": 150.0,
+            "time": 9500.0,
+            "geom": "kgpyF|szTBB",
+        }
+        parsed_short = p5_cartociudad._parse_cartociudad_payload(
+            short_payload, 40.9931, -3.6384, 40.9935, -3.6380
+        )
+        self.assertIsNotNone(parsed_short)
+        self.assertEqual(parsed_short["distancia_carretera_km"], 0.15)
+        self.assertEqual(parsed_short["tiempo_estimado_min"], 0.16)
+        self.assertEqual(
+            p5_wlc_engine.compute_proximidad_sanitaria_score(
+                parsed_short["tiempo_estimado_min"]
+            ),
+            100.0,
+        )
+
+        # Origen y destino coincidentes -> distancia 0.0 / tiempo 0.0 válidos y cacheados
+        with patch.object(
+            p5_cartociudad, "_request_cartociudad", new_callable=AsyncMock
+        ) as mock_req:
+            mock_req.return_value = {"found": True, "distance": 0.0, "time": 0.0, "geom": ""}
+            zero_route = await p5_cartociudad.calculate_route_cartociudad(
+                BUITRAGO_LAT, BUITRAGO_LON, BUITRAGO_LAT, BUITRAGO_LON
+            )
+            self.assertEqual(zero_route["distancia_carretera_km"], 0.0)
+            self.assertEqual(zero_route["tiempo_estimado_min"], 0.0)
+            self.assertEqual(len(p5_cartociudad._CARTOCIUDAD_MEM_CACHE), 1)
+
+        # Distancia 0.0 para puntos alejados sigue siendo inválida
+        self.assertIsNone(
+            p5_cartociudad._parse_cartociudad_payload(
+                {"found": True, "distance": 0.0, "time": 0.0, "geom": ""},
+                MADARCOS_LAT,
+                MADARCOS_LON,
+                BUITRAGO_LAT,
+                BUITRAGO_LON,
+            )
+        )
+
+        # Cadena GeoJSON serializada
+        geojson_str = json.dumps(
+            {
+                "type": "LineString",
+                "coordinates": [[MADARCOS_LON, MADARCOS_LAT], [BUITRAGO_LON, BUITRAGO_LAT]],
+            }
+        )
+        self.assertEqual(
+            p5_cartociudad._parse_cartociudad_geometry(geojson_str),
+            [[MADARCOS_LAT, MADARCOS_LON], [BUITRAGO_LAT, BUITRAGO_LON]],
+        )
+
+        # Cadenas inválidas no deben producir vértices falsos en (0, 0)
+        self.assertEqual(p5_cartociudad._parse_cartociudad_geometry("INVALID_GEOM"), [])
+        self.assertEqual(p5_cartociudad._parse_cartociudad_geometry("123456"), [])
+        parsed_bad_geom = p5_cartociudad._parse_cartociudad_payload(
+            {"found": True, "distance": 11400.0, "time": 732000.0, "geom": "INVALID_GEOM"},
+            MADARCOS_LAT,
+            MADARCOS_LON,
+            BUITRAGO_LAT,
+            BUITRAGO_LON,
+        )
+        self.assertEqual(parsed_bad_geom["geometria_ruta"][0], [MADARCOS_LAT, MADARCOS_LON])
+        self.assertEqual(parsed_bad_geom["geometria_ruta"][-1], [BUITRAGO_LAT, BUITRAGO_LON])
+
 
 class TestP5WLCEngineAndSchemas(unittest.TestCase):
     """Pruebas unitarias para P5.2 (5 indicadores, WLC, Consulta 1 y Schemas Pydantic)."""
@@ -338,6 +414,81 @@ class TestP5WLCEngineAndSchemas(unittest.TestCase):
             municipios, min_wlc=75.0, requiere_fibra=True, min_fibra_pct=50.0
         )
         self.assertEqual([m["codigo_ine"] for m in viables], ["28078", "28069"])
+
+    def test_audit_regressions_weights_c1_and_schema_defaults(self):
+        """
+        Pruebas de regresión de auditoría P5.2 / Schemas:
+        - Reparto proporcional de `w_infra` legado entre pilares físicos/digitales.
+        - Pesos parciales (< 1.0) conservan los pesos base para los indicadores omitidos.
+        - `filter_viable_municipios_c1` soporta `cobertura_fibra_pct=None` en raíz e instancias Pydantic/Schema.
+        - `RutaSanitariaSchema` inicializa `geometria_ruta` a `[]` de forma independiente.
+        """
+        legacy_w = p5_wlc_engine._resolve_weights(
+            custom_weights={"w_demo": 0.25, "w_health": 0.25, "w_grants": 0.25, "w_infra": 0.25}
+        )
+        self.assertGreater(legacy_w["carretera"], 0.0)
+        self.assertGreater(legacy_w["hidrico"], 0.0)
+        self.assertGreater(legacy_w["conectividad"], 0.0)
+        self.assertAlmostEqual(sum(legacy_w.values()), 1.0, places=6)
+
+        partial_w = p5_wlc_engine._resolve_weights(custom_weights={"w_sanidad": 0.4})
+        self.assertAlmostEqual(partial_w["sanidad"], 0.4, places=6)
+        self.assertGreater(partial_w["carretera"], 0.0)
+        self.assertGreater(partial_w["demografia"], 0.0)
+        self.assertAlmostEqual(sum(partial_w.values()), 1.0, places=6)
+
+        wlc_schema = WLCBreakdownSchema(
+            indice_wlc=96.05,
+            semaforo="VERDE",
+            etiqueta_viabilidad="Alta Viabilidad / Prioridad Rescate",
+            score_acceso_carretera=100.0,
+            score_proximidad_sanitaria=100.0,
+            score_conectividad_digital=99.4,
+            score_acceso_hidrico=96.5,
+            score_inercia_demografica=83.48,
+            pesos_aplicados=p5_wlc_engine.WEIGHTS_GLOBAL_5,
+        )
+        municipios_mixed = [
+            {
+                "codigo_ine": "28069",
+                "cobertura_fibra_pct": 85.0,
+                "wlc": {"indice_wlc": 79.2},
+            },
+            {
+                "codigo_ine": "28078",
+                "cobertura_fibra_pct": None,
+                "infraestructura": {"cobertura_fibra_pct": 100.0},
+                "wlc": wlc_schema,
+            },
+        ]
+        viables = p5_wlc_engine.filter_viable_municipios_c1(municipios_mixed)
+        self.assertEqual([m["codigo_ine"] for m in viables], ["28078", "28069"])
+
+        r1 = RutaSanitariaSchema(
+            id_centro="CS-28027",
+            nombre="Consultorio Local Buitrago del Lozoya",
+            tipo="Centro de Salud / Urgencias",
+            latitud=BUITRAGO_LAT,
+            longitud=BUITRAGO_LON,
+            distancia_euclidea_km=7.75,
+            distancia_carretera_km=11.4,
+            tiempo_estimado_min=12.2,
+            fuente_ruta="API CartoCiudad IGN (Tiempo Real)",
+        )
+        r2 = RutaSanitariaSchema(
+            id_centro="CS-28028",
+            nombre="Otro Centro",
+            tipo="Consultorio Local",
+            latitud=BUITRAGO_LAT,
+            longitud=BUITRAGO_LON,
+            distancia_euclidea_km=1.0,
+            distancia_carretera_km=1.2,
+            tiempo_estimado_min=2.0,
+            fuente_ruta="Fallback Haversine (45 km/h)",
+        )
+        self.assertEqual(r1.geometria_ruta, [])
+        r1.geometria_ruta.append([MADARCOS_LAT, MADARCOS_LON])
+        self.assertEqual(r2.geometria_ruta, [])
 
 
 if __name__ == "__main__":
