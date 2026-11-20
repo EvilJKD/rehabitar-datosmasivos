@@ -33,20 +33,37 @@ CREATE INDEX IF NOT EXISTS idx_municipios_provincia_hidratado ON municipios (pro
 -- TODO 2 (Responsable P2): Tabla `demografia_anual` (Serie Histórica - Sección 7.1.2)
 -- Rol en Citus: Distributed Table (shard key: `codigo_ine`)
 -- =============================================================================
--- IMPORTANTE PARA ESCALABILIDAD CITUS:
--- No usar `id SERIAL PRIMARY KEY`. La clave primaria DEBE ser compuesta `(codigo_ine, anio)`
--- para incluir la columna de particionamiento `codigo_ine`.
--- Columnas requeridas:
---   - codigo_ine VARCHAR(5) NOT NULL REFERENCES municipios(codigo_ine) ON DELETE CASCADE
---   - anio SMALLINT NOT NULL CHECK (anio BETWEEN 1900 AND 2100)
---   - poblacion INTEGER NOT NULL CHECK (poblacion >= 0)
---   - poblacion_mayor_65 INTEGER DEFAULT 0              -- Opcional (Tablas INE 2881/69744 para masa crítica)
---   - poblacion_menor_15 INTEGER DEFAULT 0
---   - tasa_envejecimiento NUMERIC(5, 2) DEFAULT 0.00
---   - PRIMARY KEY (codigo_ine, anio)
+-- Fuente: tabla 2881 de INE Tempus (Padrón municipal), cargada por etl/p2_ine/etl_ine.py.
+-- Una fila por municipio y año.
 --
--- Índice a crear para Consulta 3 (variación a 10 años):
---   - CREATE INDEX IF NOT EXISTS idx_demografia_anio_codigo ON demografia_anual (anio, codigo_ine);
+-- Por qué clave primaria compuesta (codigo_ine, anio) y no un id SERIAL:
+--   Citus reparte (shard) esta tabla entre los workers según codigo_ine.
+--   Citus exige que la PK / restricciones UNIQUE incluyan la columna de reparto; si no,
+--   no puede comprobar la unicidad dentro de un único nodo.
+--   Además, metricas_infraestructura y convocatoria_municipio también se reparten por codigo_ine,
+--   así que los datos de un mismo municipio acaban en el mismo nodo y los JOIN por codigo_ine
+--   no tienen que mover datos entre nodos (co-located join).
+--
+-- Por qué las tres columnas de edad admiten NULL y no llevan DEFAULT 0:
+--   la tabla 69744, que el repo tenía prevista como fuente de edades, es en realidad la estadística
+--   de inmigraciones entre municipios y no tiene dimensión de edad (ver la explicación al principio
+--   de etl_ine.py), así que hoy no hay datos de edad utilizables.
+--   NULL significa «sin dato»; con un 0 por defecto se leería como «0 mayores / tasa de envejecimiento 0 %»,
+--   y funciones de agregación como AVG contarían esos 0, mientras que los NULL se ignoran solos.
+CREATE TABLE IF NOT EXISTS demografia_anual (
+    codigo_ine          VARCHAR(5)    NOT NULL
+                        REFERENCES municipios (codigo_ine) ON DELETE CASCADE,
+    anio                SMALLINT      NOT NULL CHECK (anio BETWEEN 1900 AND 2100),
+    poblacion           INTEGER       NOT NULL CHECK (poblacion >= 0),
+    poblacion_mayor_65  INTEGER       CHECK (poblacion_mayor_65 >= 0),
+    poblacion_menor_15  INTEGER       CHECK (poblacion_menor_15 >= 0),
+    tasa_envejecimiento NUMERIC(5, 2) CHECK (tasa_envejecimiento BETWEEN 0 AND 100),
+    CONSTRAINT pk_demografia_anual PRIMARY KEY (codigo_ine, anio)
+);
+
+-- La Consulta 3 (variación de población a 10 años) filtra todos los municipios por año, p. ej. WHERE anio IN (2015, 2025).
+-- El índice de la PK empieza por codigo_ine y no sirve para buscar por anio, así que creamos otro que empiece por anio.
+CREATE INDEX IF NOT EXISTS idx_demografia_anio_codigo ON demografia_anual (anio, codigo_ine);
 
 
 -- =============================================================================
