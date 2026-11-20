@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from pydantic import BaseModel, Field
+from ._compat import BaseModel, Field
 
 
 class InfraestructuraSchema(BaseModel):
