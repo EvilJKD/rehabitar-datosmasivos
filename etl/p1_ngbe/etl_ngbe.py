@@ -6,8 +6,13 @@ import os
 import re
 from contextlib import closing
 
-import psycopg2
-from psycopg2.extras import RealDictCursor, execute_values
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor, execute_values
+except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en host sin psycopg2
+    psycopg2 = None  # type: ignore
+    RealDictCursor = None  # type: ignore
+    execute_values = None  # type: ignore
 
 if __package__:
     from .sources import fetch_municipios_ign_api, get_coverage, get_infrastructure_lines
@@ -57,6 +62,8 @@ UPSERT_INFRAESTRUCTURA = """
 
 
 def get_db_connection():
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 no está instalado en este entorno.")
     dsn = os.getenv("DATABASE_URL_SYNC")
     if dsn:
         return psycopg2.connect(dsn, connect_timeout=10)

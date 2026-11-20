@@ -113,35 +113,43 @@ class ConvocatoriaMunicipioItemSchema(BaseModel):
 
 class MunicipioListItemSchema(BaseModel):
     """
-    TODO: Elemento de `GET /api/municipios` (Consulta 1 y Mapa V1):
-    - codigo_ine, nombre, provincia, comarca, latitud, longitud
-    - hidratado: bool
-    - poblacion_actual: int
-    - variacion_10a_pct: float
-    - cobertura_fibra_pct: float
-    - num_ayudas_abiertas: int
-    - wlc: WLCBreakdownSchema
+    Elemento de `GET /api/municipios` (Consulta 1 y Mapa V1).
     """
-    pass
+    codigo_ine: str
+    nombre: str
+    provincia: str = Field(default="Madrid")
+    comarca: str = Field(default="Sierra Norte")
+    latitud: float
+    longitud: float
+    hidratado: bool = Field(default=False)
+    poblacion_actual: Optional[int] = Field(default=None)
+    variacion_10a_pct: Optional[float] = Field(default=None)
+    cobertura_fibra_pct: Optional[float] = Field(default=None)
+    num_ayudas_abiertas: int = Field(default=0)
+    wlc: Optional[WLCBreakdownSchema] = Field(default=None)
 
 
 class MunicipioDetailSchema(BaseModel):
     """
-    TODO: Ficha completa de `GET /api/municipios/{codigo_ine}` (Consultas 1, 2, 3, 4 y Fusión en Memoria):
-    - codigo_ine, nombre, provincia, comarca, latitud, longitud
-    - hidratado: bool
-    - origen_datos: str
-    - poblacion_inicial_10a: int
-    - poblacion_actual: int
-    - variacion_10a_pct: float
-    - preserva_masa_critica: bool
-    - inercia_demografica: str
-    - infraestructura: InfraestructuraSchema
-    - wlc: WLCBreakdownSchema
-    - urgencias_mas_cercana: RutaSanitariaSchema
-    - convocatorias: List[ConvocatoriaMunicipioItemSchema]
+    Ficha completa de `GET /api/municipios/{codigo_ine}` (Consultas 1, 2, 3, 4 y Fusión en Memoria).
     """
-    pass
+    codigo_ine: str
+    nombre: str
+    provincia: str = Field(default="Madrid")
+    comarca: str = Field(default="Sierra Norte")
+    latitud: float
+    longitud: float
+    hidratado: bool = Field(default=True)
+    origen_datos: str = Field(default="CACHE_POSTGRESQL")
+    poblacion_inicial_10a: Optional[int] = Field(default=None)
+    poblacion_actual: Optional[int] = Field(default=None)
+    variacion_10a_pct: Optional[float] = Field(default=None)
+    preserva_masa_critica: bool = Field(default=False)
+    inercia_demografica: str = Field(default="SIN_DATOS")
+    infraestructura: Optional[InfraestructuraSchema] = Field(default=None)
+    wlc: Optional[WLCBreakdownSchema] = Field(default=None)
+    urgencias_mas_cercana: Optional[RutaSanitariaSchema] = Field(default=None)
+    convocatorias: List[ConvocatoriaMunicipioItemSchema] = Field(default_factory=list)
 
 
 class DemografiaPuntoAnualSchema(BaseModel):

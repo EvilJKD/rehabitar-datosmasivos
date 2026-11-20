@@ -58,8 +58,8 @@ ANIO_FIN = 2025
 # La tabla entera pesa bastante y 4 segundos (el valor por defecto de EXTERNAL_API_TIMEOUT) pueden no bastar, así que el INE lleva su propio timeout
 INE_TIMEOUT = float(os.getenv("INE_API_TIMEOUT", "30"))
 
-# Si no se indica ningún municipio y tampoco hay ninguno en la BD, se usan estos dos municipios semilla (igual que en docker-compose)
-DEFAULT_SEED_CODES = os.getenv("INITIAL_SEED_CODES", "28070,28027")
+# Si no se indica ningún municipio y tampoco hay ninguno en la BD, se usan estos municipios semilla (igual que en docker-compose)
+DEFAULT_SEED_CODES = os.getenv("INITIAL_SEED_CODES", "28078,28069,28027")
 
 # Caché sencilla en memoria: dentro de una misma ejecución, cada tabla se descarga una sola vez.
 # Si no, habría que volver a bajar la tabla entera por cada municipio procesado.

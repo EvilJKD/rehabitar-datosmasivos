@@ -1,9 +1,10 @@
 """Consultas municipales y carga de infraestructura bajo demanda."""
 
 import asyncio
+import sys
+from pathlib import Path
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from ._sa_compat import AsyncSession, text
 
 try:
     # En Docker, el directorio del ETL está en PYTHONPATH.
@@ -11,7 +12,10 @@ try:
 except ModuleNotFoundError as exc:
     if exc.name != "p1_ngbe":
         raise
-    from etl.p1_ngbe.etl_ngbe import ingest_infraestructura_municipio
+    etl_dir = Path(__file__).resolve().parents[2] / "etl"
+    if str(etl_dir) not in sys.path:
+        sys.path.insert(0, str(etl_dir))
+    from p1_ngbe.etl_ngbe import ingest_infraestructura_municipio
 
 
 MUNICIPIOS_QUERY = """

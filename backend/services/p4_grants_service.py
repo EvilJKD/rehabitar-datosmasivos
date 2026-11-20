@@ -15,8 +15,7 @@ import os
 import sys
 from typing import Dict, List, Optional
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from ._sa_compat import AsyncSession, text
 
 # En Docker PYTHONPATH ya incluye /app/etl; en local (tests, VS Code) se añade aquí.
 ETL_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "etl"))

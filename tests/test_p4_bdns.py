@@ -19,6 +19,7 @@ las fixtures `tests/fixtures/bdns/*.json` son respuestas reales de la API BDNS c
 """
 
 import copy
+import importlib.util
 import json
 import os
 import sys
@@ -352,8 +353,14 @@ class TestExtraccionHTTP(unittest.TestCase):
 # 3. MODELOS ORM Y ESQUEMA PYDANTIC
 # =============================================================================
 
+HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
+HAS_PYDANTIC = importlib.util.find_spec("pydantic") is not None
+HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None and HAS_SQLALCHEMY
+
+
 class TestModelosYEsquemas(unittest.TestCase):
 
+    @unittest.skipUnless(HAS_SQLALCHEMY, "Requiere sqlalchemy instalado (ejecutar en Docker)")
     def test_modelos_orm(self):
         from sqlalchemy.orm import configure_mappers
         from models.domain import Convocatoria, ConvocatoriaMunicipio
@@ -365,6 +372,7 @@ class TestModelosYEsquemas(unittest.TestCase):
         self.assertEqual([c.name for c in ConvocatoriaMunicipio.__table__.primary_key.columns],
                          ["codigo_ine", "codigo_bdns"])
 
+    @unittest.skipUnless(HAS_PYDANTIC, "Requiere pydantic instalado (ejecutar en Docker)")
     def test_esquema_acepta_fila_normalizada(self):
         from pydantic import ValidationError
         from schemas import ConvocatoriaMunicipioItemSchema
@@ -381,6 +389,7 @@ class TestModelosYEsquemas(unittest.TestCase):
 # 4. ENDPOINT FastAPI (sesión de BD sustituida, servicio simulado)
 # =============================================================================
 
+@unittest.skipUnless(HAS_FASTAPI, "Requiere fastapi y sqlalchemy instalados (ejecutar en Docker)")
 class TestEndpointConvocatorias(unittest.TestCase):
 
     def test_get_convocatorias_por_municipio(self):

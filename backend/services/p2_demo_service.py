@@ -37,8 +37,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from ._sa_compat import AsyncSession, text
 
 # =============================================================================
 # Umbrales de clasificación (provisionales, pendientes de confirmar en el grupo)

@@ -298,7 +298,13 @@ class TestP3LiveCAMOpenDataAPIConnection(unittest.TestCase):
         # Garantizar consulta en vivo limpia sin residuo de caché previa
         p3_etl._CAM_API_CACHE["timestamp"] = 0.0
         p3_etl._CAM_API_CACHE["records"] = []
-        centers = p3_etl.fetch_cam_health_centers_api(timeout=25, force_refresh=True)
+        try:
+            centers = p3_etl.fetch_cam_health_centers_api(timeout=25, force_refresh=True)
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "403" in msg or "ConnectionError" in msg or "Max retries" in msg:
+                self.skipTest(f"Entorno sin acceso de red hacia datos.comunidad.madrid: {msg}")
+            raise
         self.assertGreater(
             len(centers),
             50,
