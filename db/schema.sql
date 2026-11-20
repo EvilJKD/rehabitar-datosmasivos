@@ -84,25 +84,35 @@ CREATE INDEX IF NOT EXISTS idx_infra_cobertura_fibra
 
 
 -- =============================================================================
--- TODO 4 (Responsable P3): Tabla `centros_sanitarios` (Sección 7.1.4)
+-- 4. DIRECTORIO ASISTENCIAL: `centros_sanitarios` (Sección 7.1.4 - Completado por P3)
 -- Rol en Citus: Reference Table (replicada en los workers para consultas espaciales KNN)
 -- =============================================================================
--- Directorio asistencial de la Comunidad de Madrid:
---   - id_centro VARCHAR(40) PRIMARY KEY                 -- Ej. 'CS-28027'
---   - nombre VARCHAR(200) NOT NULL                      -- Ej. 'Consultorio Local Buitrago del Lozoya'
---   - tipo VARCHAR(100) NOT NULL                        -- Ej. 'Centro de Salud / Urgencias', 'Consultorio Local'
---   - tiene_urgencias BOOLEAN NOT NULL DEFAULT FALSE    -- Discriminador para Consulta 2 e Indicador 2 WLC
---   - municipio_nombre VARCHAR(120)
---   - direccion VARCHAR(250)
---   - horario VARCHAR(120)
---   - telefono VARCHAR(30)
---   - latitud DOUBLE PRECISION NOT NULL CHECK (latitud BETWEEN -90 AND 90)
---   - longitud DOUBLE PRECISION NOT NULL CHECK (longitud BETWEEN -180 AND 180)
---   - geom geometry(Point, 4326) NOT NULL               -- Punto PostGIS para operador KNN `<->`
---
--- Índices espaciales GiST a crear:
---   - CREATE INDEX IF NOT EXISTS idx_centros_sanitarios_geom ON centros_sanitarios USING GIST (geom);
---   - CREATE INDEX IF NOT EXISTS idx_centros_urgencias_geom ON centros_sanitarios USING GIST (geom) WHERE tiene_urgencias = TRUE;
+CREATE TABLE IF NOT EXISTS centros_sanitarios (
+    id_centro           VARCHAR(40) PRIMARY KEY,
+    nombre              VARCHAR(200) NOT NULL,
+    tipo                VARCHAR(100) NOT NULL,
+    tiene_urgencias     BOOLEAN NOT NULL DEFAULT FALSE,
+    municipio_nombre    VARCHAR(120),
+    direccion           VARCHAR(250),
+    horario             VARCHAR(120),
+    telefono            VARCHAR(30),
+    latitud             DOUBLE PRECISION NOT NULL CHECK (latitud BETWEEN -90 AND 90),
+    longitud            DOUBLE PRECISION NOT NULL CHECK (longitud BETWEEN -180 AND 180),
+    geom                geometry(Point, 4326) NOT NULL
+);
+
+-- Índice espacial GiST general sobre `geom`
+CREATE INDEX IF NOT EXISTS idx_centros_sanitarios_geom
+    ON centros_sanitarios USING GIST (geom);
+
+-- Índice espacial GiST parcial especializado para Consulta 2 (solo centros con urgencias médicas)
+CREATE INDEX IF NOT EXISTS idx_centros_urgencias_geom
+    ON centros_sanitarios USING GIST (geom)
+    WHERE tiene_urgencias = TRUE;
+
+-- Índice B-Tree por municipio para búsquedas administrativas locales
+CREATE INDEX IF NOT EXISTS idx_centros_sanitarios_municipio
+    ON centros_sanitarios (municipio_nombre);
 
 
 -- =============================================================================

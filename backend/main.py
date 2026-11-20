@@ -16,11 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from schemas import (
+    CentroSanitarioSchema,
     ConvocatoriaMunicipioItemSchema,
     DemografiaSerieResponseSchema,
     MunicipioDetailSchema,
     MunicipioListItemSchema,
 )
+from services.p3_health_service import list_centros_sanitarios_service
 
 app = FastAPI(
     title="Re-Habitar PoC - Ingesta Híbrida y Viabilidad Demográfica (CAM)",
@@ -160,12 +162,35 @@ async def list_convocatorias(
     pass
 
 
-@app.get("/api/centros-sanitarios", tags=["P3 Sanidad CAM"])
-async def list_centros_sanitarios(db: AsyncSession = Depends(get_db)) -> List[Dict]:
+@app.get(
+    "/api/centros-sanitarios",
+    response_model=List[CentroSanitarioSchema],
+    tags=["P3 Sanidad CAM"],
+)
+async def list_centros_sanitarios(
+    solo_urgencias: Optional[bool] = Query(
+        None, description="Filtrar solo centros con servicio de urgencias"
+    ),
+    municipio_nombre: Optional[str] = Query(
+        None, description="Filtrar por nombre del municipio (ej. 'Buitrago del Lozoya')"
+    ),
+    force_refresh: bool = Query(
+        False,
+        description="Si es True, fuerza la consulta en vivo al endpoint de Datos Abiertos de la CAM",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> List[Dict]:
     """
-    TODO: Devolver todos los centros sanitarios de `centros_sanitarios` para el mapa Leaflet.
+    Devuelve los centros sanitarios de `centros_sanitarios` para el mapa Leaflet (P3).
+    Permite filtrar por disponibilidad de urgencias o municipio y activa la hidratación
+    bajo demanda desde la API de Datos Abiertos de la Comunidad de Madrid cuando faltan datos.
     """
-    pass
+    return await list_centros_sanitarios_service(
+        db,
+        solo_urgencias=solo_urgencias,
+        municipio_nombre=municipio_nombre,
+        force_refresh=force_refresh,
+    )
 
 
 # Montaje de archivos estáticos del frontend (`frontend/`)

@@ -3,8 +3,7 @@ Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la P
 """
 
 from typing import List, Optional
-
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WLCBreakdownSchema(BaseModel):
@@ -27,23 +26,58 @@ class WLCBreakdownSchema(BaseModel):
 from .p1_geo import InfraestructuraSchema
 
 
+class CentroSanitarioSchema(BaseModel):
+    """
+    Schema Pydantic para el directorio de Centros Sanitarios de la CAM (Sección 7.1.4 - P3).
+    """
+    id_centro: str = Field(..., description="Identificador único del centro (ej. 'CS-28027')")
+    nombre: str = Field(..., description="Nombre oficial del centro sanitario")
+    tipo: str = Field(..., description="Tipología: Centro de Salud, Consultorio Local, etc.")
+    tiene_urgencias: bool = Field(
+        default=False, description="Indica si dispone de atención continuada / urgencias 24h"
+    )
+    municipio_nombre: Optional[str] = Field(None, description="Nombre del municipio donde se ubica")
+    direccion: Optional[str] = Field(None, description="Dirección postal completa")
+    horario: Optional[str] = Field(None, description="Horario de atención")
+    telefono: Optional[str] = Field(None, description="Teléfono de contacto")
+    latitud: float = Field(..., description="Latitud en WGS84 (EPSG:4326)")
+    longitud: float = Field(..., description="Longitud en WGS84 (EPSG:4326)")
+    distancia_euclidea_km: Optional[float] = Field(
+        None, description="Distancia en línea recta calculada en PostGIS (km)"
+    )
+
+
 class RutaSanitariaSchema(BaseModel):
     """
-    TODO (Responsables P3 y P5 - Consulta 2 y Sección 7.3):
-    Resultado de la fusión en tiempo real entre KNN PostGIS y API CartoCiudad:
-    - id_centro: str (ej. 'CS-28027')
-    - nombre: str (ej. 'Consultorio Local Buitrago del Lozoya')
-    - tipo: str (ej. 'Centro de Salud / Urgencias')
-    - tiene_urgencias: bool
-    - latitud: float
-    - longitud: float
-    - distancia_euclidea_km: float (KNN PostGIS)
-    - distancia_carretera_km: float (En tiempo real desde CartoCiudad, ej. 11.4 km)
-    - tiempo_estimado_min: float (En tiempo real desde CartoCiudad, ej. 12.2 min)
-    - fuente_ruta: str ('API CartoCiudad IGN (Tiempo Real)' o 'Fallback Haversine')
-    - geometria_ruta: List[List[float]]
+    Resultado de la consulta espacial KNN en PostGIS (P3) enriquecida bajo demanda
+    con la integración virtual en tiempo real de CartoCiudad (P5 - Consulta 2 y Sección 7.3).
     """
-    pass
+    id_centro: str = Field(..., description="Identificador del centro (ej. 'CS-28027')")
+    nombre: str = Field(..., description="Nombre del centro (ej. 'Consultorio Local Buitrago del Lozoya')")
+    tipo: str = Field(..., description="Tipología del centro sanitario")
+    tiene_urgencias: bool = Field(..., description="True si cuenta con servicio de urgencias")
+    municipio_nombre: Optional[str] = Field(None, description="Municipio del centro sanitario")
+    direccion: Optional[str] = Field(None, description="Dirección postal del centro")
+    horario: Optional[str] = Field(None, description="Horario de atención")
+    telefono: Optional[str] = Field(None, description="Teléfono de contacto")
+    latitud: float = Field(..., description="Latitud WGS84 (EPSG:4326)")
+    longitud: float = Field(..., description="Longitud WGS84 (EPSG:4326)")
+    distancia_euclidea_km: float = Field(
+        ..., description="Distancia en línea recta obtenida por KNN PostGIS (km)"
+    )
+    distancia_carretera_km: Optional[float] = Field(
+        None, description="Distancia real por carretera desde CartoCiudad (ej. 11.4 km)"
+    )
+    tiempo_estimado_min: Optional[float] = Field(
+        None, description="Tiempo estimado de conducción en minutos desde CartoCiudad (ej. 12.2 min)"
+    )
+    fuente_ruta: Optional[str] = Field(
+        None, description="'API CartoCiudad IGN (Tiempo Real)' o 'Fallback Haversine'"
+    )
+    geometria_ruta: List[List[float]] = Field(
+        default_factory=list,
+        description="Lista de coordenadas [[lat, lon], ...] de la polilínea hacia el centro sanitario",
+    )
 
 
 class ConvocatoriaMunicipioItemSchema(BaseModel):
