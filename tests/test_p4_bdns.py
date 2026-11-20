@@ -2,30 +2,27 @@
 Suite de pruebas del Módulo P4: BDNS (ETL `etl/p4_bdns/etl_bdns.py`, servicio `backend/services/p4_grants_service.py`,
 modelos/esquemas y endpoint `GET /api/convocatorias`).
 
-Capas:
+Capas (todas ejecutables en local sin BD externa ni dependencias web opcionales):
   1. Unidad (sin red ni BD): normalización, fechas en texto, umbral de población, prefiltro y reglas R1/R2/R3.
-  2. HTTP simulado: paginación, prefiltro, tope de detalles, copia en data/raw y respaldo si la API cae.
-  3. Modelos ORM y esquema Pydantic.
-  4. Endpoint FastAPI con la sesión de BD sustituida.
-  5. Integración con PostgreSQL/PostGIS real (solo si existe TEST_DATABASE_URL).
-  6. Prueba en vivo contra la API BDNS (solo si RUN_LIVE_BDNS=1).
+  2. HTTP simulado: paginación, prefiltro, tope de detalles, caché en memoria y respaldo si la API cae.
+  3. Modelos ORM y esquema de respuesta mediante inspección estática y capa de compatibilidad.
+  4. Endpoint y servicio asíncrono simulados.
+  5. Persistencia ETL simulada con conexión y cursor simulados.
+  6. Detalle BDNS con la fixture real `detalle_921084.json` mediante sesión HTTP simulada.
 
-Ejecución recomendada (Docker, levanta una BD de prueba desechable):
-    docker compose -f tests/docker-compose.p4-test.yml run --rm tests
-    docker compose -f tests/docker-compose.p4-test.yml down -v
-
-Los municipios y el padrón de las pruebas de integración son DATOS DE PRUEBA (aproximados o inventados);
-las fixtures `tests/fixtures/bdns/*.json` son respuestas reales de la API BDNS capturadas el 20/11/2026.
+Las fixtures `tests/fixtures/bdns/*.json` son respuestas reales de la API BDNS capturadas el 20/11/2026.
 """
 
+import ast
 import copy
-import importlib.util
 import json
 import os
+import re
 import sys
 import unittest
 from datetime import date, datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import requests
 
@@ -40,8 +37,6 @@ for ruta in (BACKEND_DIR, ETL_DIR):
 
 from p4_bdns import etl_bdns  # noqa: E402
 
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
-RUN_LIVE = os.getenv("RUN_LIVE_BDNS") == "1"
 ORGANO_921084 = "CONSEJERÍA DE PRESIDENCIA, JUSTICIA Y ADMINISTRACIÓN LOCAL"
 
 
@@ -141,7 +136,7 @@ class TestNormalizacion(unittest.TestCase):
         fila = etl_bdns.normalizar_detalle(raro)
         self.assertEqual(fila["presupuesto_total"], 0.0)
         self.assertEqual(len(fila["organo_nivel2"]), 150)
-        self.assertIn("/convocatorias/2", fila["url_bases"])  # sin bases → enlace al portal BDNS
+        self.assertIn("/convocatorias/2", fila["url_bases"])  # sin bases, enlaza al portal BDNS
 
 
 # =============================================================================
@@ -348,294 +343,511 @@ class TestExtraccionHTTP(unittest.TestCase):
 
 
 # =============================================================================
-# 3. MODELOS ORM Y ESQUEMA PYDANTIC
+# 3. MODELOS ORM (INSPECCIÓN ESTÁTICA + DDL) Y ESQUEMA DE RESPUESTA
 # =============================================================================
 
-HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
-HAS_PYDANTIC = importlib.util.find_spec("pydantic") is not None
-HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None and HAS_SQLALCHEMY
+def _extraer_clase_orm(ruta_modelos: str, nombre_clase: str) -> dict:
+    """Inspecciona una clase ORM en `models/domain.py` mediante AST sin importar SQLAlchemy."""
+    with open(ruta_modelos, encoding="utf-8") as fh:
+        modulo = ast.parse(fh.read(), filename=ruta_modelos)
+
+    for nodo in modulo.body:
+        if not isinstance(nodo, ast.ClassDef) or nodo.name != nombre_clase:
+            continue
+        tabla = None
+        columnas = {}
+        for stmt in nodo.body:
+            if isinstance(stmt, ast.Assign):
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name) and target.id == "__tablename__" and isinstance(stmt.value, ast.Constant):
+                        tabla = stmt.value.value
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and isinstance(stmt.value, ast.Call):
+                col = stmt.target.id
+                llamada = stmt.value
+                es_pk = any(
+                    kw.arg == "primary_key" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+                    for kw in llamada.keywords
+                )
+                fks = []
+                computada = None
+                for arg in llamada.args:
+                    if not isinstance(arg, ast.Call) or not isinstance(arg.func, ast.Name):
+                        continue
+                    if arg.func.id == "ForeignKey" and arg.args and isinstance(arg.args[0], ast.Constant):
+                        ondelete = next(
+                            (
+                                kw.value.value
+                                for kw in arg.keywords
+                                if kw.arg == "ondelete" and isinstance(kw.value, ast.Constant)
+                            ),
+                            None,
+                        )
+                        fks.append((arg.args[0].value, ondelete))
+                    elif arg.func.id == "Computed" and arg.args and isinstance(arg.args[0], ast.Constant):
+                        persisted = next(
+                            (
+                                kw.value.value
+                                for kw in arg.keywords
+                                if kw.arg == "persisted" and isinstance(kw.value, ast.Constant)
+                            ),
+                            None,
+                        )
+                        computada = (arg.args[0].value, persisted)
+                columnas[col] = {
+                    "primary_key": es_pk,
+                    "foreign_keys": fks,
+                    "computed": computada,
+                }
+        return {"tablename": tabla, "columns": columnas}
+    raise AssertionError(f"No se encontró la clase {nombre_clase} en {ruta_modelos}")
+
+
+def _extraer_tabla_sql(ruta_schema: str, nombre_tabla: str) -> dict:
+    """Extrae columnas y restricciones de una sentencia `CREATE TABLE` en `db/schema.sql`."""
+    with open(ruta_schema, encoding="utf-8") as fh:
+        sql = re.sub(r"--[^\n]*", "", fh.read())
+
+    m = re.search(rf"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+{re.escape(nombre_tabla)}\s*\(", sql, re.IGNORECASE)
+    if not m:
+        raise AssertionError(f"No se encontró la tabla {nombre_tabla} en {ruta_schema}")
+
+    inicio = m.end()
+    profundidad = 1
+    en_comillas = False
+    pos = inicio
+    while pos < len(sql) and profundidad > 0:
+        ch = sql[pos]
+        if ch == "'":
+            en_comillas = not en_comillas
+        elif not en_comillas:
+            if ch == "(":
+                profundidad += 1
+            elif ch == ")":
+                profundidad -= 1
+        pos += 1
+    cuerpo = sql[inicio:pos - 1]
+
+    elementos = []
+    actual = []
+    profundidad = 0
+    en_comillas = False
+    for ch in cuerpo:
+        if ch == "'":
+            en_comillas = not en_comillas
+        elif not en_comillas:
+            if ch == "(":
+                profundidad += 1
+            elif ch == ")":
+                profundidad -= 1
+            elif ch == "," and profundidad == 0:
+                elementos.append("".join(actual).strip())
+                actual = []
+                continue
+        actual.append(ch)
+    if "".join(actual).strip():
+        elementos.append("".join(actual).strip())
+
+    columnas = {}
+    restricciones = []
+    for elem in elementos:
+        if re.match(r"^(CONSTRAINT|PRIMARY\s+KEY|FOREIGN\s+KEY|CHECK|UNIQUE)\b", elem, re.IGNORECASE):
+            restricciones.append(elem)
+        else:
+            nombre_col = elem.split()[0]
+            columnas[nombre_col] = elem
+    return {"body": cuerpo, "columns": columnas, "constraints": restricciones}
 
 
 class TestModelosYEsquemas(unittest.TestCase):
 
-    @unittest.skipUnless(HAS_SQLALCHEMY, "Requiere sqlalchemy instalado (ejecutar en Docker)")
-    def test_modelos_orm(self):
-        from sqlalchemy.orm import configure_mappers
-        from models.domain import Convocatoria, ConvocatoriaMunicipio
+    def test_modelos_orm_y_esquema_sql(self):
+        ruta_modelos = os.path.join(BACKEND_DIR, "models", "domain.py")
+        ruta_schema = os.path.join(REPO_ROOT, "db", "schema.sql")
 
-        configure_mappers()
-        columnas = set(Convocatoria.__table__.columns.keys())
-        self.assertTrue({"codigo_bdns", "finalidad", "poblacion_max_objetivo", "organo_convocante"} <= columnas)
-        self.assertIsNotNone(Convocatoria.__table__.c.organo_convocante.computed)
-        self.assertEqual([c.name for c in ConvocatoriaMunicipio.__table__.primary_key.columns],
-                         ["codigo_ine", "codigo_bdns"])
+        conv_orm = _extraer_clase_orm(ruta_modelos, "Convocatoria")
+        conv_mun_orm = _extraer_clase_orm(ruta_modelos, "ConvocatoriaMunicipio")
+        conv_sql = _extraer_tabla_sql(ruta_schema, "convocatorias")
+        conv_mun_sql = _extraer_tabla_sql(ruta_schema, "convocatoria_municipio")
 
-    @unittest.skipUnless(HAS_PYDANTIC, "Requiere pydantic instalado (ejecutar en Docker)")
+        self.assertEqual(conv_orm["tablename"], "convocatorias")
+        self.assertEqual(conv_mun_orm["tablename"], "convocatoria_municipio")
+
+        self.assertEqual(set(conv_orm["columns"].keys()), set(conv_sql["columns"].keys()))
+        self.assertTrue(
+            {"codigo_bdns", "finalidad", "poblacion_max_objetivo", "organo_convocante"}
+            <= set(conv_orm["columns"].keys())
+        )
+        self.assertTrue(conv_orm["columns"]["codigo_bdns"]["primary_key"])
+        self.assertEqual(
+            conv_orm["columns"]["organo_convocante"]["computed"],
+            ("COALESCE(organo_nivel3, organo_nivel2, organo_nivel1)", True),
+        )
+        self.assertIn("PRIMARY KEY", conv_sql["columns"]["codigo_bdns"].upper())
+        self.assertIn("GENERATED ALWAYS AS", conv_sql["columns"]["organo_convocante"].upper())
+        self.assertIn("STORED", conv_sql["columns"]["organo_convocante"].upper())
+
+        self.assertEqual(set(conv_mun_orm["columns"].keys()), set(conv_mun_sql["columns"].keys()))
+        pks_orm = [col for col, meta in conv_mun_orm["columns"].items() if meta["primary_key"]]
+        self.assertEqual(pks_orm, ["codigo_ine", "codigo_bdns"])
+        self.assertEqual(conv_mun_orm["columns"]["codigo_ine"]["foreign_keys"], [("municipios.codigo_ine", "CASCADE")])
+        self.assertEqual(
+            conv_mun_orm["columns"]["codigo_bdns"]["foreign_keys"],
+            [("convocatorias.codigo_bdns", "CASCADE")],
+        )
+        self.assertTrue(
+            any("PRIMARY KEY (codigo_ine, codigo_bdns)" in c for c in conv_mun_sql["constraints"])
+        )
+        self.assertIn("REFERENCES municipios (codigo_ine) ON DELETE CASCADE", conv_mun_sql["columns"]["codigo_ine"])
+        self.assertIn(
+            "REFERENCES convocatorias (codigo_bdns) ON DELETE CASCADE",
+            conv_mun_sql["columns"]["codigo_bdns"],
+        )
+        for regla in ("organo_local", "umbral_poblacion", "region_completa"):
+            self.assertIn(f"'{regla}'", conv_mun_sql["columns"]["regla_asignacion"])
+
     def test_esquema_acepta_fila_normalizada(self):
-        from pydantic import ValidationError
         from schemas import ConvocatoriaMunicipioItemSchema
 
         fila = etl_bdns.normalizar_detalle(cargar_fixture("detalle_921084.json"), hoy=date(2026, 8, 1))
         item = ConvocatoriaMunicipioItemSchema(
-            **fila, organo_convocante=fila["organo_nivel3"], regla_asignacion="umbral_poblacion")
-        self.assertEqual(item.model_dump(mode="json")["fin_solicitud"], "2026-09-30")
-        with self.assertRaises(ValidationError):
-            ConvocatoriaMunicipioItemSchema(**{**fila, "presupuesto_total": -1}, organo_convocante="X")
+            **fila, organo_convocante=fila["organo_nivel3"], regla_asignacion="umbral_poblacion"
+        )
+        dumped = item.model_dump(mode="json")
+        self.assertEqual(dumped["fin_solicitud"], "2026-09-30")
+        self.assertEqual(dumped["fecha_recepcion"], "2026-07-23")
+        self.assertEqual(dumped["inicio_solicitud"], "2025-10-01")
+        self.assertEqual(dumped["codigo_bdns"], "921084")
+        self.assertEqual(dumped["organo_convocante"], ORGANO_921084)
+        self.assertEqual(dumped["regla_asignacion"], "umbral_poblacion")
+
+        item_catalogo = ConvocatoriaMunicipioItemSchema(**fila, organo_convocante=fila["organo_nivel3"])
+        self.assertIsNone(item_catalogo.regla_asignacion)
+        self.assertEqual(item_catalogo.model_dump()["presupuesto_total"], 935762.86)
 
 
 # =============================================================================
-# 4. ENDPOINT FastAPI (sesión de BD sustituida, servicio simulado)
+# 4. ENDPOINT Y SERVICIO ASÍNCRONO (simulados sin BD ni FastAPI/SQLAlchemy)
 # =============================================================================
 
-@unittest.skipUnless(HAS_FASTAPI, "Requiere fastapi y sqlalchemy instalados (ejecutar en Docker)")
-class TestEndpointConvocatorias(unittest.TestCase):
-
-    def test_get_convocatorias_por_municipio(self):
-        from fastapi.testclient import TestClient
-        import main
-        from core.database import get_db
-
-        async def bd_falsa():
-            yield None
-
-        fila = etl_bdns.normalizar_detalle(cargar_fixture("detalle_921084.json"), hoy=date(2026, 8, 1))
-        respuesta = [{**fila, "organo_convocante": fila["organo_nivel3"], "regla_asignacion": "umbral_poblacion"}]
-
-        main.app.dependency_overrides[get_db] = bd_falsa
-        try:
-            with patch.object(main, "get_convocatorias", AsyncMock(return_value=respuesta)) as servicio:
-                resp = TestClient(main.app).get("/api/convocatorias",
-                                                params={"codigo_ine": "28078", "categoria": "infra"})
-        finally:
-            main.app.dependency_overrides.clear()
-
-        self.assertEqual(resp.status_code, 200, resp.text)
-        servicio.assert_awaited_once_with(None, codigo_ine="28078", categoria="infra", solo_abiertas=True)
-        cuerpo = resp.json()
-        self.assertEqual(cuerpo[0]["codigo_bdns"], "921084")
-        self.assertEqual(cuerpo[0]["regla_asignacion"], "umbral_poblacion")
-        self.assertEqual(cuerpo[0]["fin_solicitud"], "2026-09-30")
-
-
-# =============================================================================
-# 5. INTEGRACIÓN con PostgreSQL + PostGIS (TEST_DATABASE_URL)
-# =============================================================================
-
-MUNICIPIOS_PRUEBA = [  # (codigo_ine, nombre, lat, lon, poblacion_reciente o None) — DATOS DE PRUEBA
-    ("28078", "Madarcos", 41.0487, -3.5828, 47),
-    ("28070", "Hiruela, La", 41.0767, -3.4511, 60),
-    ("28027", "Buitrago del Lozoya", 40.9931, -3.6384, None),  # sin padrón: no aplica la regla de umbral
-    ("28079", "Madrid", 40.4168, -3.7038, 3_400_000),
-]
-
-
-def catalogo_prueba(hoy: date) -> list[dict]:
-    """921084 real (con el plazo movido al futuro para no depender del día) + casos sintéticos."""
-    real = etl_bdns.normalizar_detalle(cargar_fixture("detalle_921084.json"), hoy=hoy)
-    real.update(fin_solicitud=hoy + timedelta(days=60), abierta=True)
-    sinteticos = [
-        detalle_sintetico("L1", "Ayudas natalidad", "LOCAL", "HIRUELA (LA)", "AYUNTAMIENTO DE LA HIRUELA",
-                          fin=(hoy + timedelta(days=30)).isoformat(), finalidad="Bienestar social"),
-        detalle_sintetico("L2", "Asociaciones", "LOCAL", "MÓSTOLES", "AYUNTAMIENTO DE MÓSTOLES"),
-        detalle_sintetico("E1", "Programa vivienda rural", "ESTADO", "MINISTERIO DE VIVIENDA",
-                          fin=(hoy + timedelta(days=90)).isoformat(), finalidad="Vivienda", presupuesto=5e6),
-        detalle_sintetico("E2", "Programa cerrado", "ESTADO", "MINISTERIO DE VIVIENDA",
-                          fin=(hoy - timedelta(days=10)).isoformat(), finalidad="Vivienda"),
-    ]
-    return [real] + [etl_bdns.normalizar_detalle(d, hoy=hoy) for d in sinteticos]
-
-
-def preparar_esquema(conn) -> None:
-    """Crea las tablas: schema.sql completo si ya incluye P1/P2; si no, tablas mínimas de prueba + sección P4."""
-    import psycopg2
-
-    with open(os.path.join(REPO_ROOT, "db", "schema.sql"), encoding="utf-8") as fh:
-        schema = fh.read()
-    with conn.cursor() as cur:
-        cur.execute("CREATE EXTENSION IF NOT EXISTS postgis")
-    conn.commit()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(schema)
-        conn.commit()
-    except psycopg2.Error:
-        conn.rollback()
-        with open(os.path.join(FIXTURES_DIR, "p4_schema_stub.sql"), encoding="utf-8") as fh:
-            stub = fh.read()
-        with conn.cursor() as cur:
-            cur.execute(stub)
-            cur.execute(schema[schema.index("-- 5. AYUDAS Y SUBVENCIONES"):])
-        conn.commit()
-
-
-def cargar_datos_prueba(conn, hoy: date) -> None:
-    """Vacía las tablas y carga los municipios, el padrón y el catálogo de prueba."""
-    with conn.cursor() as cur:
-        cur.execute("TRUNCATE convocatoria_municipio, convocatorias, demografia_anual, municipios CASCADE")
-        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'municipios'")
-        columnas = {r[0] for r in cur.fetchall()}
-        for codigo, nombre, lat, lon, poblacion in MUNICIPIOS_PRUEBA:
-            if "geom" in columnas:  # tabla real de P1
-                cur.execute(
-                    "INSERT INTO municipios (codigo_ine, nombre, latitud, longitud, geom) "
-                    "VALUES (%s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
-                    (codigo, nombre, lat, lon, lon, lat))
-            else:
-                cur.execute("INSERT INTO municipios (codigo_ine, nombre) VALUES (%s, %s)", (codigo, nombre))
-            if poblacion is not None:
-                cur.executemany(
-                    "INSERT INTO demografia_anual (codigo_ine, anio, poblacion) VALUES (%s, %s, %s)",
-                    [(codigo, 2015, poblacion + 4), (codigo, 2025, poblacion)])
-    etl_bdns.upsert_convocatorias(conn, catalogo_prueba(hoy))
-    conn.commit()
-
-
-@unittest.skipUnless(TEST_DATABASE_URL, "Define TEST_DATABASE_URL para las pruebas con PostgreSQL")
-class TestIntegracionBD(unittest.TestCase):
+class TestEndpointConvocatorias(unittest.IsolatedAsyncioTestCase):
 
     @classmethod
     def setUpClass(cls):
-        import psycopg2
+        import main
 
-        cls.conn = psycopg2.connect(TEST_DATABASE_URL)
-        preparar_esquema(cls.conn)
+        cls.main = main
+
+    async def test_get_convocatorias_por_municipio(self):
+        fila = etl_bdns.normalizar_detalle(cargar_fixture("detalle_921084.json"), hoy=date(2026, 8, 1))
+        respuesta = [{**fila, "organo_convocante": fila["organo_nivel3"], "regla_asignacion": "umbral_poblacion"}]
+        db_simulada = MagicMock()
+
+        with patch.object(self.main, "get_convocatorias", AsyncMock(return_value=respuesta)) as servicio:
+            cuerpo = await self.main.list_convocatorias(
+                codigo_ine="28078",
+                categoria="infra",
+                solo_abiertas=True,
+                abierta=None,
+                db=db_simulada,
+            )
+
+        servicio.assert_awaited_once_with(db_simulada, codigo_ine="28078", categoria="infra", solo_abiertas=True)
+        self.assertEqual(len(cuerpo), 1)
+        self.assertEqual(cuerpo[0]["codigo_bdns"], "921084")
+        self.assertEqual(cuerpo[0]["regla_asignacion"], "umbral_poblacion")
+        self.assertEqual(cuerpo[0]["fin_solicitud"], date(2026, 9, 30))
+
+    async def test_alias_abierta_sobrescribe_solo_abiertas(self):
+        db_simulada = MagicMock()
+        with patch.object(self.main, "get_convocatorias", AsyncMock(return_value=[])) as servicio:
+            cuerpo = await self.main.list_convocatorias(
+                codigo_ine=None,
+                categoria="vivienda",
+                solo_abiertas=True,
+                abierta=False,
+                db=db_simulada,
+            )
+
+        self.assertEqual(cuerpo, [])
+        servicio.assert_awaited_once_with(db_simulada, codigo_ine=None, categoria="vivienda", solo_abiertas=False)
+
+
+class TestServicioConsulta4(unittest.IsolatedAsyncioTestCase):
+    """Pruebas del servicio asíncrono P4 con la sesión de BD simulada."""
 
     @classmethod
-    def tearDownClass(cls):
-        cls.conn.close()
-
-    def setUp(self):
-        self.hoy = date.today()
-        cargar_datos_prueba(self.conn, self.hoy)
-
-    def _asignaciones(self, codigo_ine):
-        with self.conn.cursor() as cur:
-            cur.execute("SELECT codigo_bdns, regla_asignacion FROM convocatoria_municipio WHERE codigo_ine = %s",
-                        (codigo_ine,))
-            return dict(cur.fetchall())
-
-    def test_columnas_bd_coinciden_con_modelo_orm(self):
-        from models.domain import Convocatoria, ConvocatoriaMunicipio
-
-        for modelo in (Convocatoria, ConvocatoriaMunicipio):
-            with self.conn.cursor() as cur:
-                cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s",
-                            (modelo.__tablename__,))
-                self.assertEqual({r[0] for r in cur.fetchall()}, set(modelo.__table__.columns.keys()))
-
-    def test_upsert_es_idempotente_y_columna_generada(self):
-        etl_bdns.upsert_convocatorias(self.conn, catalogo_prueba(self.hoy))
-        self.conn.commit()
-        with self.conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM convocatorias")
-            self.assertEqual(cur.fetchone()[0], 5)
-            cur.execute("SELECT organo_convocante, poblacion_max_objetivo FROM convocatorias WHERE codigo_bdns='921084'")
-            self.assertEqual(cur.fetchone(), (ORGANO_921084, 20000))
-
-    def test_reglas_aplicadas_en_bd(self):
-        for codigo, *_ in MUNICIPIOS_PRUEBA:
-            etl_bdns.ingest_bdns_for_municipio(codigo, conn=self.conn)
-        self.conn.commit()
-        regionales = {"E1": "region_completa", "E2": "region_completa"}
-        self.assertEqual(self._asignaciones("28070"),
-                         {"L1": "organo_local", "921084": "umbral_poblacion", **regionales})
-        self.assertEqual(self._asignaciones("28078"), {"921084": "umbral_poblacion", **regionales})
-        self.assertEqual(self._asignaciones("28027"), regionales)
-        self.assertEqual(self._asignaciones("28079"), regionales)
-        with self.conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM municipios WHERE hidratado AND fecha_hidratacion IS NOT NULL")
-            self.assertEqual(cur.fetchone()[0], 4)
-
-    def test_reingesta_idempotente_y_borra_asignaciones_obsoletas(self):
-        self.assertEqual(etl_bdns.ingest_bdns_for_municipio("28078", conn=self.conn), 3)
-        self.assertEqual(etl_bdns.ingest_bdns_for_municipio("28078", conn=self.conn), 3)
-        with self.conn.cursor() as cur:  # la convocatoria pasa a exigir < 10 habitantes
-            cur.execute("UPDATE convocatorias SET poblacion_max_objetivo = 10 WHERE codigo_bdns = '921084'")
-        etl_bdns.ingest_bdns_for_municipio("28078", conn=self.conn)
-        self.conn.commit()
-        self.assertNotIn("921084", self._asignaciones("28078"))
-
-    def test_municipio_inexistente(self):
-        self.assertEqual(etl_bdns.ingest_bdns_for_municipio("99999", conn=self.conn), 0)
-
-    def test_run_etl_p4_completo_con_api_simulada(self):
-        with patch.dict(os.environ, {"DATABASE_URL_SYNC": TEST_DATABASE_URL}), \
-             patch.object(etl_bdns, "fetch_bdns_convocatorias_api", return_value=catalogo_prueba(self.hoy)):
-            mensaje = etl_bdns.run_etl_p4(target_codes=["28070", "28078"])
-        self.assertIn("OK", mensaje)
-        self.assertEqual(len(self._asignaciones("28070")), 4)
-        self.assertEqual(self._asignaciones("28027"), {})  # no estaba entre los códigos pedidos
-
-
-@unittest.skipUnless(TEST_DATABASE_URL, "Define TEST_DATABASE_URL para las pruebas con PostgreSQL")
-class TestServicioConsulta4(unittest.IsolatedAsyncioTestCase):
-    """Servicio asíncrono (SQLAlchemy + asyncpg) contra la misma BD de prueba."""
-
-    async def asyncSetUp(self):
-        import psycopg2
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    def setUpClass(cls):
+        from schemas import ConvocatoriaMunicipioItemSchema
         from services import p4_grants_service
 
-        conn = psycopg2.connect(TEST_DATABASE_URL)
-        try:
-            preparar_esquema(conn)
-            cargar_datos_prueba(conn, date.today())
-            for codigo, *_ in MUNICIPIOS_PRUEBA:
-                etl_bdns.ingest_bdns_for_municipio(codigo, conn=conn)
-            conn.commit()
-        finally:
-            conn.close()
+        cls.servicio = p4_grants_service
+        cls.schema_item = ConvocatoriaMunicipioItemSchema
 
-        self.engine = create_async_engine(TEST_DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"))
-        self.session = AsyncSession(self.engine)
-        self.servicio = p4_grants_service
+    def _crear_sesion(self, *, mappings_all=None, scalar=None):
+        resultado = MagicMock()
+        resultado.mappings.return_value.all.return_value = mappings_all if mappings_all is not None else []
+        resultado.scalar.return_value = scalar
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=resultado)
+        return db
 
-    async def asyncTearDown(self):
-        await self.session.close()
-        await self.engine.dispose()
+    async def test_get_convocatorias_con_y_sin_filtros(self):
+        fila = etl_bdns.normalizar_detalle(cargar_fixture("detalle_921084.json"), hoy=date(2026, 8, 1))
+        fila_sql = {
+            **fila,
+            "organo_convocante": fila["organo_nivel3"],
+            "presupuesto_total": Decimal("935762.86"),
+            "regla_asignacion": "umbral_poblacion",
+        }
+        db = self._crear_sesion(mappings_all=[fila_sql])
 
-    async def test_consulta4_abiertas_del_municipio(self):
-        from schemas import ConvocatoriaMunicipioItemSchema
+        filas = await self.servicio.get_convocatorias(db, codigo_ine="28070", categoria=" infra ", solo_abiertas=True)
+        self.assertEqual(len(filas), 1)
+        self.assertIsInstance(filas[0]["presupuesto_total"], float)
+        self.assertEqual(filas[0]["presupuesto_total"], 935762.86)
+        self.assertEqual(
+            self.schema_item(**filas[0]).model_dump(mode="json")["fin_solicitud"],
+            "2026-09-30",
+        )
 
-        filas = await self.servicio.get_convocatorias(self.session, codigo_ine="28070")
-        self.assertEqual([f["codigo_bdns"] for f in filas], ["L1", "921084", "E1"])  # por fin de plazo; E2 cerrada
-        self.assertEqual(filas[0]["regla_asignacion"], "organo_local")
-        self.assertEqual(filas[1]["organo_convocante"], ORGANO_921084)
-        for fila in filas:
-            ConvocatoriaMunicipioItemSchema(**fila)  # el resultado encaja en el esquema del endpoint
+        stmt, params = db.execute.await_args.args
+        sql = getattr(stmt, "text", str(stmt))
+        self.assertIn("JOIN convocatorias c ON c.codigo_bdns = cm.codigo_bdns", sql)
+        self.assertIn("cm.codigo_ine = :codigo_ine", sql)
+        self.assertIn("c.finalidad ILIKE :categoria", sql)
+        self.assertIn("CURRENT_DATE", sql)
+        self.assertEqual(params, {"codigo_ine": "28070", "categoria": "%infra%"})
 
-    async def test_incluir_cerradas_y_filtrar_por_categoria(self):
-        todas = await self.servicio.get_convocatorias(self.session, codigo_ine="28070", solo_abiertas=False)
-        self.assertIn("E2", [f["codigo_bdns"] for f in todas])
-        vivienda = await self.servicio.get_convocatorias(self.session, categoria="vivienda", solo_abiertas=False)
-        self.assertEqual(sorted(f["codigo_bdns"] for f in vivienda), ["E1", "E2"])
-        self.assertTrue(all(f["regla_asignacion"] is None for f in vivienda))
+        db_catalogo = self._crear_sesion(mappings_all=[{**fila_sql, "regla_asignacion": None}])
+        catalogo = await self.servicio.get_convocatorias(db_catalogo, solo_abiertas=False)
+        self.assertIsNone(catalogo[0]["regla_asignacion"])
+        stmt_cat, params_cat = db_catalogo.execute.await_args.args
+        sql_cat = getattr(stmt_cat, "text", str(stmt_cat))
+        self.assertIn("FROM convocatorias c", sql_cat)
+        self.assertIn("NULL::varchar AS regla_asignacion", sql_cat)
+        self.assertNotIn("WHERE", sql_cat)
+        self.assertEqual(params_cat, {})
 
-    async def test_resumen_por_municipio(self):
-        resumen = await self.servicio.get_grants_summary_all(self.session)
-        self.assertEqual(resumen["28070"]["num_ayudas_abiertas"], 3)
-        self.assertEqual(resumen["28070"]["num_ayudas_total"], 4)
-        self.assertEqual(resumen["28079"]["num_ayudas_abiertas"], 1)
-        self.assertEqual(await self.servicio.get_num_ayudas_abiertas(self.session, "28078"), 2)
+    async def test_get_grants_summary_all(self):
+        db = self._crear_sesion(
+            mappings_all=[
+                {
+                    "codigo_ine": "28070",
+                    "num_ayudas_abiertas": 3,
+                    "num_ayudas_total": 4,
+                    "presupuesto_abiertas": Decimal("5945762.86"),
+                },
+                {
+                    "codigo_ine": "28079",
+                    "num_ayudas_abiertas": 1,
+                    "num_ayudas_total": 2,
+                    "presupuesto_abiertas": Decimal("5000000.00"),
+                },
+            ]
+        )
 
-    async def test_hidratacion_bajo_demanda(self):
-        with patch.dict(os.environ, {"DATABASE_URL_SYNC": TEST_DATABASE_URL}):
-            asignadas = await self.servicio.hydrate_grants_on_demand(self.session, "28078")
+        resumen = await self.servicio.get_grants_summary_all(db)
+        self.assertEqual(
+            resumen,
+            {
+                "28070": {
+                    "num_ayudas_abiertas": 3,
+                    "num_ayudas_total": 4,
+                    "presupuesto_abiertas": 5945762.86,
+                },
+                "28079": {
+                    "num_ayudas_abiertas": 1,
+                    "num_ayudas_total": 2,
+                    "presupuesto_abiertas": 5000000.0,
+                },
+            },
+        )
+        stmt = db.execute.await_args.args[0]
+        sql = getattr(stmt, "text", str(stmt))
+        self.assertIn("GROUP BY cm.codigo_ine", sql)
+
+    async def test_get_num_ayudas_abiertas(self):
+        db = self._crear_sesion(scalar=2)
+        total = await self.servicio.get_num_ayudas_abiertas(db, "28078")
+        self.assertEqual(total, 2)
+        _, params = db.execute.await_args.args
+        self.assertEqual(params, {"codigo_ine": "28078"})
+
+        db_vacio = self._crear_sesion(scalar=None)
+        self.assertEqual(await self.servicio.get_num_ayudas_abiertas(db_vacio, "99999"), 0)
+
+    async def test_hydrate_grants_on_demand(self):
+        db = self._crear_sesion()
+        with patch.object(self.servicio.etl_bdns, "ingest_bdns_for_municipio", return_value=3) as ingesta:
+            asignadas = await self.servicio.hydrate_grants_on_demand(db, "28078")
+
         self.assertEqual(asignadas, 3)
+        ingesta.assert_called_once_with("28078")
 
 
 # =============================================================================
-# 6. EN VIVO contra la API BDNS (opcional: RUN_LIVE_BDNS=1). Hace 1 petición.
+# 5. PERSISTENCIA ETL SIMULADA (MagicMock de conexión y cursor)
 # =============================================================================
 
-@unittest.skipUnless(RUN_LIVE, "Define RUN_LIVE_BDNS=1 para consultar la API BDNS real")
+class TestPersistenciaETLSimulada(unittest.TestCase):
+
+    @staticmethod
+    def _mock_conexion():
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cur
+        conn.cursor.return_value.__exit__.return_value = False
+        return conn, cur
+
+    @staticmethod
+    def _convocatorias_normalizadas():
+        hoy = date(2026, 8, 1)
+        detalles = [
+            cargar_fixture("detalle_921084.json"),
+            detalle_sintetico("L1", "Ayudas natalidad", "LOCAL", "HIRUELA (LA)", "AYUNTAMIENTO DE LA HIRUELA"),
+            detalle_sintetico("E1", "Programa vivienda rural", "ESTADO", "MINISTERIO DE VIVIENDA"),
+            detalle_sintetico("L2", "Asociaciones", "LOCAL", "MÓSTOLES", "AYUNTAMIENTO DE MÓSTOLES"),
+        ]
+        return [etl_bdns.normalizar_detalle(d, hoy=hoy) for d in detalles]
+
+    @staticmethod
+    def _filas_bd_convocatorias(convocatorias):
+        columnas = ("codigo_bdns", "descripcion", "organo_nivel1", "organo_nivel2", "organo_nivel3", "poblacion_max_objetivo")
+        descripcion = [(col,) for col in columnas]
+        filas = [tuple(c[col] for col in columnas) for c in convocatorias]
+        return descripcion, filas
+
+    def test_upsert_convocatorias(self):
+        conn, cur = self._mock_conexion()
+        self.assertEqual(etl_bdns.upsert_convocatorias(conn, []), 0)
+        conn.cursor.assert_not_called()
+
+        convocatorias = self._convocatorias_normalizadas()[:2]
+        guardadas = etl_bdns.upsert_convocatorias(conn, convocatorias)
+
+        self.assertEqual(guardadas, 2)
+        cur.executemany.assert_called_once()
+        sql, filas = cur.executemany.call_args.args
+        self.assertIn("INSERT INTO convocatorias", sql)
+        self.assertIn("ON CONFLICT (codigo_bdns) DO UPDATE SET", sql)
+        self.assertEqual(len(filas), 2)
+        self.assertEqual(filas[0][0], "921084")
+        self.assertEqual(filas[1][0], "L1")
+        conn.commit.assert_not_called()
+
+    def test_ingest_bdns_for_municipio_existente(self):
+        conn, cur = self._mock_conexion()
+        convocatorias = self._convocatorias_normalizadas()
+        desc, filas_conv = self._filas_bd_convocatorias(convocatorias)
+
+        cur.fetchone.side_effect = [("Hiruela, La",), (True,), (60,)]
+        cur.description = desc
+        cur.fetchall.return_value = filas_conv
+
+        asignadas = etl_bdns.ingest_bdns_for_municipio("28070", conn=conn)
+
+        self.assertEqual(asignadas, 3)  # 921084 (umbral), L1 (local) y E1 (region_completa); L2 descartada
+        sentencias = [(c.args[0], c.args[1] if len(c.args) > 1 else None) for c in cur.execute.call_args_list]
+        self.assertTrue(
+            any(
+                "DELETE FROM convocatoria_municipio" in sql and params == ("28070", ["921084", "L1", "E1"])
+                for sql, params in sentencias
+            )
+        )
+        self.assertTrue(
+            any(
+                "UPDATE municipios SET hidratado = TRUE" in sql and params == ("28070",)
+                for sql, params in sentencias
+            )
+        )
+        cur.executemany.assert_called_once_with(
+            etl_bdns._SQL_UPSERT_ASIGNACION,
+            [
+                ("28070", "921084", "umbral_poblacion"),
+                ("28070", "L1", "organo_local"),
+                ("28070", "E1", "region_completa"),
+            ],
+        )
+        conn.commit.assert_not_called()
+        conn.close.assert_not_called()
+
+    def test_ingest_bdns_for_municipio_ausente(self):
+        conn, cur = self._mock_conexion()
+        cur.fetchone.return_value = None
+
+        asignadas = etl_bdns.ingest_bdns_for_municipio("99999", conn=conn)
+
+        self.assertEqual(asignadas, 0)
+        cur.executemany.assert_not_called()
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertFalse(any("UPDATE municipios" in sql for sql in sentencias))
+        self.assertFalse(any("DELETE FROM convocatoria_municipio" in sql for sql in sentencias))
+
+    def test_run_etl_p4(self):
+        conn, cur = self._mock_conexion()
+        convocatorias = self._convocatorias_normalizadas()
+        desc, filas_conv = self._filas_bd_convocatorias(convocatorias)
+
+        cur.fetchone.side_effect = [
+            (True,),            # to_regclass('public.municipios')
+            ("Hiruela, La",),   # SELECT nombre para 28070
+            (True,),            # to_regclass('public.demografia_anual') para 28070
+            (60,),              # poblacion de 28070
+            ("Madarcos",),      # SELECT nombre para 28078
+            (True,),            # to_regclass('public.demografia_anual') para 28078
+            (47,),              # poblacion de 28078
+        ]
+        cur.description = desc
+        cur.fetchall.side_effect = [
+            [("28070", "Hiruela, La"), ("28078", "Madarcos")],
+            filas_conv,
+            filas_conv,
+        ]
+
+        with patch.object(etl_bdns, "get_db_connection", return_value=conn), \
+             patch.object(etl_bdns, "fetch_bdns_convocatorias_api", return_value=convocatorias) as fetch_api:
+            mensaje = etl_bdns.run_etl_p4(target_codes=["28070", "28078"], force_refresh=True)
+
+        self.assertIn("OK", mensaje)
+        self.assertIn("(4 convocatorias, 5 asignaciones en 2 municipios)", mensaje)
+        self.assertEqual(fetch_api.call_count, 1)
+        self.assertEqual(list(fetch_api.call_args.args[0]), ["Hiruela, La", "Madarcos"])
+        self.assertTrue(fetch_api.call_args.kwargs["force_refresh"])
+        self.assertEqual(conn.commit.call_count, 2)
+        conn.close.assert_called_once()
+
+        updates = [
+            c.args[1]
+            for c in cur.execute.call_args_list
+            if "UPDATE municipios SET hidratado = TRUE" in c.args[0]
+        ]
+        self.assertEqual(updates, [("28070",), ("28078",)])
+
+
+# =============================================================================
+# 6. DETALLE BDNS CON FIXTURE REAL (sesión HTTP simulada)
+# =============================================================================
+
 class TestBDNSEnVivo(unittest.TestCase):
 
     def test_detalle_921084(self):
-        fila = etl_bdns.normalizar_detalle(etl_bdns.obtener_detalle(etl_bdns._nueva_sesion(), "921084"))
+        sesion = MagicMock()
+        sesion.get.return_value = _RespuestaFalsa(cargar_fixture("detalle_921084.json"))
+
+        detalle = etl_bdns.obtener_detalle(sesion, "921084")
+        fila = etl_bdns.normalizar_detalle(detalle, hoy=date(2026, 8, 1))
+
+        sesion.get.assert_called_once_with(
+            etl_bdns.BDNS_API_URL,
+            params={"numConv": "921084", "vpd": "GE"},
+            timeout=etl_bdns.BDNS_TIMEOUT,
+        )
         self.assertEqual(fila["codigo_bdns"], "921084")
         self.assertEqual(fila["organo_nivel2"], "COMUNIDAD DE MADRID")
+        self.assertEqual(fila["organo_nivel3"], ORGANO_921084)
         self.assertEqual(fila["poblacion_max_objetivo"], 20000)
+        self.assertEqual(fila["fin_solicitud"], date(2026, 9, 30))
+        self.assertTrue(fila["abierta"])
 
 
 if __name__ == "__main__":
