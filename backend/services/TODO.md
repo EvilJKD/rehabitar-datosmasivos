@@ -25,8 +25,9 @@ Cada servicio implementa las consultas y reglas descritas en las **Secciones 4, 
 ---
 
 ## 4. Desarrollador P4 — `p4_grants_service.py` (Consulta 4: Ayudas Abiertas del Municipio)
-- [ ] **`hydrate_grants_on_demand(db, codigo_ine)`**: Si el municipio aún no ha sido cruzado en `convocatoria_municipio`, invocar a `ingest_bdns_for_municipio(codigo_ine)` evaluando la `regla_asignacion` (`organo_local | umbral_poblacion | region_completa`) y marcando `municipios.hidratado = TRUE`.
-- [ ] **`get_convocatorias(db, codigo_ine, solo_abiertas=True)`**:
+- [x] **`hydrate_grants_on_demand(db, codigo_ine)`**: Si el municipio aún no ha sido cruzado en `convocatoria_municipio`, invocar a `ingest_bdns_for_municipio(codigo_ine)` evaluando la `regla_asignacion` (`organo_local | umbral_poblacion | region_completa`) y marcando `municipios.hidratado = TRUE`. *(Rama `P4`: se ejecuta en un hilo con `asyncio.to_thread`.)*
+- [x] **`get_grants_summary_all(db)`** y **`get_num_ayudas_abiertas(db, codigo_ine)`**: resumen `{codigo_ine: {num_ayudas_abiertas, num_ayudas_total, presupuesto_abiertas}}` para P2/P5 y el mapa.
+- [x] **`get_convocatorias(db, codigo_ine, categoria, solo_abiertas=True)`**: *(Rama `P4`)*
   - Resolver la **Consulta 4 (Sección 6.5)**: *"¿Qué convocatorias aplicables al municipio seleccionado están abiertas (`abierta = TRUE`), y con qué órgano convocante (`organo_convocante` / `organo_nivel1..3`), presupuesto (`presupuesto_total`), regla de asignación (`regla_asignacion`) y fecha de fin de plazo (`fin_solicitud`)?"*
 
 ---

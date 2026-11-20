@@ -26,5 +26,5 @@
 - [ ] **Paso 4: Implementar `GET /api/municipios/{codigo_ine}/demografia` (Resuelve la Consulta 3 - Sección 6.5)**
   - Devolver la serie histórica de `demografia_anual`, la tasa de variación acumulada a 10 años y el diagnóstico de masa crítica comunitaria, lista para la **Visualización 2 (Chart.js)**.
 
-- [ ] **Paso 5: Implementar `GET /api/convocatorias` (Resuelve la Consulta 4 - Sección 6.5)**
+- [x] **Paso 5: Implementar `GET /api/convocatorias` (Resuelve la Consulta 4 - Sección 6.5)** — *Completado en la rama `P4` (parámetros `codigo_ine`, `categoria`, `solo_abiertas`)*
   - Devolver las convocatorias aplicables al `codigo_ine` que están abiertas (`abierta = TRUE`), incluyendo `descripcion`, `organo_convocante` (`organo_nivel1/2/3`), `presupuesto_total`, `fin_solicitud`, `url_bases` y `regla_asignacion` (`organo_local | umbral_poblacion | region_completa`).

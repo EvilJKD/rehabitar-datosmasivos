@@ -91,29 +91,64 @@
 
 
 -- =============================================================================
--- TODO 5 (Responsable P4): Tablas `convocatorias` y `convocatoria_municipio` (Sección 7.1.5 y 7.1.6)
+-- 5. AYUDAS Y SUBVENCIONES: `convocatorias` y `convocatoria_municipio` (Sección 7.1.5 y 7.1.6 - Completado por P4)
+-- Fuente: API de la Base de Datos Nacional de Subvenciones (BDNS / SNPSAP), cargada por etl/p4_bdns/etl_bdns.py.
 -- =============================================================================
--- 5.1 Tabla `convocatorias` (BDNS - Reference Table en Citus):
---   - codigo_bdns VARCHAR(30) PRIMARY KEY               -- Ej. '921084'
---   - descripcion TEXT NOT NULL                         -- Título/objeto de la ayuda
---   - organo_nivel1 VARCHAR(150) NOT NULL               -- Ej. 'COMUNIDAD DE MADRID' o 'ESTADO'
---   - organo_nivel2 VARCHAR(150)                        -- Ej. 'CONSEJERÍA DE PRESIDENCIA...'
---   - organo_nivel3 VARCHAR(150)                        -- Ej. 'DIRECCIÓN GENERAL DE REEQUILIBRIO TERRITORIAL'
---   - organo_convocante TEXT GENERATED ALWAYS AS (COALESCE(organo_nivel3, organo_nivel2, organo_nivel1)) STORED
---   - fecha_recepcion DATE NOT NULL DEFAULT CURRENT_DATE
---   - inicio_solicitud DATE
---   - fin_solicitud DATE
---   - abierta BOOLEAN NOT NULL DEFAULT TRUE             -- Filtro de Consulta 4
---   - presupuesto_total NUMERIC(14, 2) NOT NULL DEFAULT 0.00
---   - tipo_beneficiario VARCHAR(150)
---   - poblacion_max_objetivo INTEGER DEFAULT 20000      -- Umbral demográfico (ej. 20000 hab)
---   - url_bases TEXT
+
+-- 5.1 `convocatorias` (Rol en Citus: Reference Table, replicada en todos los workers).
+-- Es un catálogo pequeño (cientos de filas por comunidad autónoma) que se cruza con cualquier municipio,
+-- así que replicarla evita mover datos entre nodos en los JOIN con `convocatoria_municipio`.
 --
--- 5.2 Tabla `convocatoria_municipio` (Resultado de asignación - Distributed Table por `codigo_ine` en Citus):
--- IMPORTANTE PARA CITUS: Clave primaria compuesta `(codigo_ine, codigo_bdns)` con `codigo_ine` primero
--- para co-localizar los datos en el mismo nodo worker que `demografia_anual` y `metricas_infraestructura`:
---   - codigo_ine VARCHAR(5) NOT NULL REFERENCES municipios(codigo_ine) ON DELETE CASCADE
---   - codigo_bdns VARCHAR(30) NOT NULL REFERENCES convocatorias(codigo_bdns) ON DELETE CASCADE
---   - regla_asignacion VARCHAR(30) NOT NULL CHECK (regla_asignacion IN ('organo_local', 'umbral_poblacion', 'region_completa'))
---   - fecha_asignacion TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
---   - PRIMARY KEY (codigo_ine, codigo_bdns)
+-- Cambios respecto al esquema preliminar de la propuesta:
+--   * `poblacion_max_objetivo` NO lleva DEFAULT 20000: NULL significa "la convocatoria no tiene umbral de población".
+--     Con un 20000 por defecto, todas las ayudas parecerían limitadas a municipios pequeños y la regla
+--     `umbral_poblacion` se aplicaría a convocatorias que no la mencionan.
+--   * `finalidad` (nueva): `descripcionFinalidad` de la BDNS (ej. 'Infraestructuras', 'Vivienda'). Permite el filtro
+--     `categoria` de `GET /api/convocatorias`.
+--   * `abierta` se guarda como "abierta en el momento de la extracción" (campo `abierto` de la BDNS y fecha de fin
+--     no vencida). Las consultas vuelven a comprobar `fin_solicitud >= CURRENT_DATE` para no depender de la última carga.
+CREATE TABLE IF NOT EXISTS convocatorias (
+    codigo_bdns            VARCHAR(30)    PRIMARY KEY,                 -- Ej. '921084'
+    descripcion            TEXT           NOT NULL,                    -- Título/objeto de la ayuda
+    organo_nivel1          VARCHAR(150)   NOT NULL,                    -- 'ESTADO' | 'AUTONOMICA' | 'LOCAL' | 'OTROS'
+    organo_nivel2          VARCHAR(150),                               -- Ej. 'COMUNIDAD DE MADRID' o el municipio ('LA HIRUELA')
+    organo_nivel3          VARCHAR(150),                               -- Ej. 'CONSEJERÍA DE PRESIDENCIA, JUSTICIA Y ADMINISTRACIÓN LOCAL'
+    organo_convocante      TEXT GENERATED ALWAYS AS (COALESCE(organo_nivel3, organo_nivel2, organo_nivel1)) STORED,
+    fecha_recepcion        DATE           NOT NULL DEFAULT CURRENT_DATE,
+    inicio_solicitud       DATE,
+    fin_solicitud          DATE,
+    abierta                BOOLEAN        NOT NULL DEFAULT TRUE,       -- Filtro de la Consulta 4
+    presupuesto_total      NUMERIC(14, 2) NOT NULL DEFAULT 0.00 CHECK (presupuesto_total >= 0),
+    tipo_beneficiario      VARCHAR(150),
+    finalidad              VARCHAR(150),                               -- Categoría (descripcionFinalidad BDNS)
+    poblacion_max_objetivo INTEGER        CHECK (poblacion_max_objetivo > 0),  -- NULL = sin umbral
+    url_bases              TEXT,
+    fecha_extraccion       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Consulta 4: "convocatorias abiertas ordenadas por fin de plazo".
+CREATE INDEX IF NOT EXISTS idx_convocatorias_abiertas_fin
+    ON convocatorias (fin_solicitud)
+    WHERE abierta = TRUE;
+
+-- Regla `organo_local`: búsqueda de las convocatorias de entidades locales por nombre del órgano.
+CREATE INDEX IF NOT EXISTS idx_convocatorias_organo
+    ON convocatorias (organo_nivel1, organo_nivel2);
+
+
+-- 5.2 `convocatoria_municipio` (resultado de la asignación; Rol en Citus: Distributed Table por `codigo_ine`).
+-- Clave primaria compuesta con `codigo_ine` primero: así Citus la co-localiza con `demografia_anual` y
+-- `metricas_infraestructura`, y los cruces por municipio se resuelven dentro de cada worker.
+CREATE TABLE IF NOT EXISTS convocatoria_municipio (
+    codigo_ine        VARCHAR(5)  NOT NULL REFERENCES municipios (codigo_ine) ON DELETE CASCADE,
+    codigo_bdns       VARCHAR(30) NOT NULL REFERENCES convocatorias (codigo_bdns) ON DELETE CASCADE,
+    regla_asignacion  VARCHAR(30) NOT NULL
+                      CHECK (regla_asignacion IN ('organo_local', 'umbral_poblacion', 'region_completa')),
+    fecha_asignacion  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_convocatoria_municipio PRIMARY KEY (codigo_ine, codigo_bdns)
+);
+
+-- La PK empieza por codigo_ine; este índice sirve para el camino inverso
+-- ("¿a qué municipios se ha asignado la convocatoria X?") y para el ON DELETE CASCADE desde `convocatorias`.
+CREATE INDEX IF NOT EXISTS idx_convocatoria_municipio_bdns
+    ON convocatoria_municipio (codigo_bdns);

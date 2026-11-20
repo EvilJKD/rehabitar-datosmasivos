@@ -21,6 +21,7 @@ from schemas import (
     MunicipioDetailSchema,
     MunicipioListItemSchema,
 )
+from services.p4_grants_service import get_convocatorias
 
 app = FastAPI(
     title="Re-Habitar PoC - Ingesta Híbrida y Viabilidad Demográfica (CAM)",
@@ -151,13 +152,20 @@ async def get_municipio_demografia(
 )
 async def list_convocatorias(
     codigo_ine: Optional[str] = Query(None, description="Filtrar por código INE del municipio"),
-    categoria: Optional[str] = Query(None, description="Filtrar por categoría de la convocatoria"),
+    categoria: Optional[str] = Query(
+        None, description="Filtrar por finalidad/categoría de la convocatoria (ej. 'Infraestructuras', 'vivienda')"
+    ),
+    solo_abiertas: bool = Query(True, description="Si es True, solo convocatorias con el plazo abierto hoy"),
     db: AsyncSession = Depends(get_db),
 ) -> List[ConvocatoriaMunicipioItemSchema]:
     """
-    TODO: Devolver las convocatorias de la BDNS filtradas por municipio y/o categoría.
+    Consulta 4 (P4): convocatorias de la BDNS aplicables al municipio (`codigo_ine`), con órgano
+    convocante, presupuesto, fin de plazo y la regla por la que se asignaron
+    (`organo_local | umbral_poblacion | region_completa`). Sin `codigo_ine`, lista el catálogo completo.
     """
-    pass
+    return await get_convocatorias(
+        db, codigo_ine=codigo_ine, categoria=categoria, solo_abiertas=solo_abiertas
+    )
 
 
 @app.get("/api/centros-sanitarios", tags=["P3 Sanidad CAM"])
