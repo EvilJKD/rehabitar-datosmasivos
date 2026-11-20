@@ -2,6 +2,12 @@
 Modelos ORM de SQLAlchemy alineados con el esquema normalizado y Citus-Ready (`db/schema.sql`).
 """
 
+from decimal import Decimal
+from typing import Optional
+
+from sqlalchemy import ForeignKey, Integer, Numeric, SmallInteger, String
+from sqlalchemy.orm import Mapped, mapped_column
+
 from core.database import Base
 
 
@@ -31,9 +37,30 @@ class DemografiaAnual(Base):
     - poblacion_mayor_65 (Integer)
     - poblacion_menor_15 (Integer)
     - tasa_envejecimiento (Numeric(5, 2))
+
+    Se corresponde columna a columna con el Paso 3 de db/schema.sql. Notas:
+    - Estilo SQLAlchemy 2.0: Mapped[tipo] fija el tipo en Python y si admite NULL;
+      Mapped[Optional[int]] → la columna admite NULL; Mapped[int] → NOT NULL.
+    - Al marcar las dos columnas con primary_key=True se forma la clave primaria compuesta
+      (codigo_ine, anio). Mismo orden que en schema.sql: codigo_ine primero (columna de reparto en Citus).
+    - Las tres columnas de edad son Optional: de momento no hay fuente de datos por edad
+      (la tabla 69744 no tiene dimensión de edad), en la BD están a NULL y se leen como None.
+    - Los CHECK y el índice solo se definen en schema.sql: la tabla la crea schema.sql y el ORM
+      solo lee y escribe (no se usa create_all()), así que aquí no se repiten.
     """
     __tablename__ = "demografia_anual"
-    pass
+
+    codigo_ine: Mapped[str] = mapped_column(
+        String(5),
+        ForeignKey("municipios.codigo_ine", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    anio: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    poblacion: Mapped[int] = mapped_column(Integer, nullable=False)
+    poblacion_mayor_65: Mapped[Optional[int]] = mapped_column(Integer)
+    poblacion_menor_15: Mapped[Optional[int]] = mapped_column(Integer)
+    # Numeric se lee en Python como Decimal (decimal exacto), no como float
+    tasa_envejecimiento: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
 
 
 class MetricaInfraestructura(Base):

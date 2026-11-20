@@ -2,7 +2,9 @@
 Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la Propuesta.
 """
 
-from pydantic import BaseModel
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict
 
 
 class WLCBreakdownSchema(BaseModel):
@@ -115,8 +117,19 @@ class DemografiaPuntoAnualSchema(BaseModel):
     - poblacion_mayor_65: Optional[int]
     - poblacion_menor_15: Optional[int]
     - tasa_envejecimiento: Optional[float]
+
+    Dato de un año (un punto de la gráfica de líneas de Chart.js).
+    Las tres columnas de edad son Optional con None por defecto, que corresponde al NULL de la BD
+    (de momento no hay fuente de datos por edad); así el frontend puede distinguir «sin dato» de «0».
     """
-    pass
+    # from_attributes=True: además de con un dict, se puede construir directamente desde un objeto ORM (DemografiaAnual)
+    model_config = ConfigDict(from_attributes=True)
+
+    anio: int
+    poblacion: int
+    poblacion_mayor_65: Optional[int] = None
+    poblacion_menor_15: Optional[int] = None
+    tasa_envejecimiento: Optional[float] = None
 
 
 class DemografiaSerieResponseSchema(BaseModel):
@@ -131,5 +144,23 @@ class DemografiaSerieResponseSchema(BaseModel):
     - distancia_urgencias_km: float
     - num_ayudas_abiertas: int
     - serie_anual: List[DemografiaPuntoAnualSchema]
+
+    Cambios respecto a la descripción original de arriba (todos para que, si falta un dato,
+    no se rompa nada ni se invente nada):
+    - poblacion_inicial_10a / variacion_10a_pct pasan a ser Optional:
+      si al INE le falta el año de hace 10 años, o la población de entonces es 0, no se puede
+      calcular y se devuelve None.
+    - cobertura_fibra_pct (P1), distancia_urgencias_km (P3) y num_ayudas_abiertas (P4)
+      pasan a ser Optional con None por defecto: salen de tablas de otros compañeros, el service
+      de P2 no las consulta; las pasa quien llama (main.py) después de pedírselas a los services
+      de P1/P3/P4. Si no se pasan, quedan en None.
     """
-    pass
+    codigo_ine: str
+    nombre: str
+    poblacion_inicial_10a: Optional[int] = None
+    poblacion_actual: int
+    variacion_10a_pct: Optional[float] = None
+    cobertura_fibra_pct: Optional[float] = None
+    distancia_urgencias_km: Optional[float] = None
+    num_ayudas_abiertas: Optional[int] = None
+    serie_anual: List[DemografiaPuntoAnualSchema]
