@@ -3,8 +3,8 @@
 # Prueba local completa de P2: un solo comando que ejecuta toda la parte de P2 desde cero
 #
 # Uso:
-#   etl/p2_ine/run_local_test.sh          # al terminar borra automáticamente la BD temporal
-#   etl/p2_ine/run_local_test.sh --keep   # al terminar deja la BD temporal para mirarla con psql
+#   tests/run_local_test.sh          # al terminar borra automáticamente la BD temporal
+#   tests/run_local_test.sh --keep   # al terminar deja la BD temporal para mirarla con psql
 #
 # Qué hace (cada paso imprime «[n/9] ...»):
 #   1. Comprueba Docker               2. Para el p2_test anterior   3. Arranca un PostgreSQL temporal
@@ -39,18 +39,18 @@ PG_DB="rehabitar_db"
 ESPERA_MAX=60          # segundos máximos de espera hasta que la BD esté lista
 FILAS_ESPERADAS=22     # 28069 + 28027, 11 años cada uno (2015–2025)
 
-# Localizar la raíz del repo: este script vive en <raíz>/etl/p2_ine/, así que subiendo dos niveles llegamos.
+# Localizar la raíz del repo: este script vive en <raíz>/tests/, así que subiendo un nivel llegamos.
 # BASH_SOURCE[0] es la ruta del propio script; da igual desde qué carpeta se lance, el resultado es el mismo.
 # La ruta lleva caracteres chinos y espacios, por eso todas las variables van entre comillas dobles "...";
 # si no, la shell partiría "Datos Masivos y Encadenados" por los espacios en varios argumentos.
 # Además: si justo detrás de una variable va un carácter no ASCII (chino, una letra con tilde...),
 # hay que escribirla como ${VARIABLE} (con llaves), por ejemplo "${IMAGEN}, puerto".
 # Sin llaves, el bash 3.2 de macOS toma los bytes de ese carácter como parte del nombre y da unbound variable.
-RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEMA_SQL="$RAIZ/db/schema.sql"
 PYTHON="$RAIZ/.venv/bin/python"
 ETL="$RAIZ/etl/p2_ine/etl_ine.py"
-PRUEBAS="$RAIZ/etl/p2_ine/probar_p2_backend.py"
+PRUEBAS="$RAIZ/tests/probar_p2_backend.py"
 
 # ---------------------------- Argumentos ----------------------------
 KEEP=0

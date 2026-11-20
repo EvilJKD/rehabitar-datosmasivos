@@ -8,20 +8,22 @@ El script es de solo lectura: descarga datos del INE, lee ficheros del repo e im
 No modifica ningún fichero ni se conecta a la base de datos.
 
 Uso:
-    python etl/p2_ine/verificar_codigos.py              # imprime la comprobación (tablas Markdown)
-    python etl/p2_ine/verificar_codigos.py --todos      # además lista todos los municipios de Madrid «código → nombre»
-    python etl/p2_ine/verificar_codigos.py > codigos.md # lo guarda en un fichero para pasarlo al grupo
+    python tests/verificar_codigos.py              # imprime la comprobación (tablas Markdown)
+    python tests/verificar_codigos.py --todos      # además lista todos los municipios de Madrid «código → nombre»
+    python tests/verificar_codigos.py > codigos.md # lo guarda en un fichero para pasarlo al grupo
 """
 
 import argparse
 import re
+import sys
 import unicodedata
 from pathlib import Path
 
-# Está en la misma carpeta que etl_ine.py, así que reutilizamos su función de descarga (que también pide solo la tabla 2881)
-from etl_ine import TABLA_POBLACION_TOTAL, _download_tabla
+RAIZ_REPO = Path(__file__).resolve().parents[1]
+if str(RAIZ_REPO / "etl") not in sys.path:
+    sys.path.insert(0, str(RAIZ_REPO / "etl"))
 
-RAIZ_REPO = Path(__file__).resolve().parents[2]
+from p2_ine.etl_ine import TABLA_POBLACION_TOTAL, _download_tabla  # noqa: E402
 CARPETAS_IGNORADAS = {".git", ".venv", "venv", "node_modules", "__pycache__"}
 EXTENSIONES = {".py", ".md", ".yml", ".yaml", ".js", ".html", ".sql", ".json", ".txt", ".env", ".example"}
 

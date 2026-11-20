@@ -21,8 +21,7 @@ Flujo (Extract → Transform → Load):
         - Palabras clave del dominio (rural, municipios, habitantes, vivienda...) configurables.
         - Tope BDNS_MAX_DETALLES de detalles a pedir (la BDNS avisa de que limita el acceso abusivo).
      c) Detalle de cada convocatoria seleccionada: GET /convocatorias?numConv=XXXX&vpd=GE
-     d) Copia del JSON crudo en etl/data/raw/bdns/ (respaldo si la API cae y fichero de
-        "datos extraídos de la fuente" para la entrega).
+     d) Caché en memoria RAM (respaldo si la API cae dentro del mismo proceso).
 
   2. TRANSFORM (normalizar_detalle)
      - Fechas ISO; si la BDNS no publica fechaInicio/FinSolicitud, se interpretan los textos
@@ -49,7 +48,7 @@ Ejecución aislada:
 from __future__ import annotations
 
 import argparse
-import json
+import copy
 import os
 import re
 import time
@@ -74,13 +73,10 @@ BDNS_MAX_PAGINAS = int(os.getenv("BDNS_MAX_PAGINAS", "40"))
 BDNS_MAX_DETALLES = int(os.getenv("BDNS_MAX_DETALLES", "150"))
 BDNS_PAUSA_SEG = float(os.getenv("BDNS_PAUSA_SEG", "0.3"))          # cortesía entre peticiones
 BDNS_TIMEOUT = float(os.getenv("BDNS_TIMEOUT", "20"))
-BDNS_CACHE_HORAS = float(os.getenv("BDNS_CACHE_HORAS", "24"))        # reutiliza la última descarga
+BDNS_CACHE_HORAS = float(os.getenv("BDNS_CACHE_HORAS", "24"))        # reutiliza la última descarga en RAM
 
-BDNS_RAW_DIR = os.getenv(
-    "BDNS_RAW_DIR",
-    os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "raw", "bdns")),
-)
-BDNS_CACHE_FILE = "convocatorias_madrid.json"
+# Caché en memoria RAM (sin ficheros locales en disco)
+_BDNS_MEM_CACHE: Optional[dict] = None
 
 # Palabras clave del dominio (reto demográfico / medio rural). Vacío o "*" desactiva el filtro.
 _PALABRAS_CLAVE_DEFECTO = (
@@ -410,7 +406,7 @@ def asignar_convocatorias(
 
 
 # =============================================================================
-# EXTRACT: cliente HTTP de la API BDNS + copia en data/raw
+# EXTRACT: cliente HTTP de la API BDNS + caché en memoria RAM
 # =============================================================================
 
 def _nueva_sesion() -> requests.Session:
@@ -470,25 +466,13 @@ def obtener_detalle(sesion: requests.Session, numero: str) -> dict:
     return _get_json(sesion, BDNS_API_URL, {"numConv": numero, "vpd": "GE"})
 
 
-def _ruta_cache() -> str:
-    return os.path.join(BDNS_RAW_DIR, BDNS_CACHE_FILE)
-
-
 def cargar_cache() -> Optional[dict]:
-    try:
-        with open(_ruta_cache(), encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return None
+    return copy.deepcopy(_BDNS_MEM_CACHE) if _BDNS_MEM_CACHE is not None else None
 
 
 def guardar_cache(payload: dict) -> None:
-    try:
-        os.makedirs(BDNS_RAW_DIR, exist_ok=True)
-        with open(_ruta_cache(), "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, ensure_ascii=False, indent=2)
-    except OSError as exc:
-        log(f"AVISO: no se pudo guardar la copia en {BDNS_RAW_DIR}: {exc}")
+    global _BDNS_MEM_CACHE
+    _BDNS_MEM_CACHE = copy.deepcopy(payload)
 
 
 def _cache_vigente(payload: Optional[dict]) -> bool:
@@ -513,7 +497,7 @@ def fetch_bdns_convocatorias_api(
 
     - `nombres_municipios`: municipios del sistema; se usan para no descartar las convocatorias
       LOCALES de sus ayuntamientos.
-    - Si hay una descarga de menos de BDNS_CACHE_HORAS en data/raw y no se fuerza, se reutiliza.
+    - Si hay una descarga en memoria de menos de BDNS_CACHE_HORAS y no se fuerza, se reutiliza.
     - Si la API falla, se usa la última copia guardada (aunque sea antigua); si no hay, devuelve [].
     """
     hoy = hoy or date.today()
@@ -747,7 +731,7 @@ def run_etl_p4(target_codes: list[str] | None = None, force_refresh: bool = Fals
 def _main() -> None:
     parser = argparse.ArgumentParser(description="ETL P4: convocatorias BDNS → PostgreSQL")
     parser.add_argument("codigos", nargs="*", help="Códigos INE a asignar (por defecto, todos los de la BD)")
-    parser.add_argument("--force-refresh", action="store_true", help="Ignora la copia reciente de data/raw")
+    parser.add_argument("--force-refresh", action="store_true", help="Ignora la caché reciente en memoria")
     parser.add_argument("--dry-run", action="store_true", help="Solo descarga y muestra; no toca la BD")
     parser.add_argument("--nombres", default="", help="(dry-run) Municipios separados por comas")
     args = parser.parse_args()
@@ -756,7 +740,7 @@ def _main() -> None:
         nombres = [n for n in args.nombres.split(",") if n.strip()]
         convocatorias = fetch_bdns_convocatorias_api(nombres, force_refresh=args.force_refresh)
         abiertas = [c for c in convocatorias if c["abierta"]]
-        log(f"{len(convocatorias)} convocatorias normalizadas ({len(abiertas)} abiertas). Copia en {_ruta_cache()}")
+        log(f"{len(convocatorias)} convocatorias normalizadas ({len(abiertas)} abiertas) desde API BDNS.")
         for c in convocatorias[:10]:
             log(
                 f"  {c['codigo_bdns']} | {c['organo_nivel1']} | fin={c['fin_solicitud']} | "

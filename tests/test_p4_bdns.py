@@ -23,7 +23,6 @@ import importlib.util
 import json
 import os
 import sys
-import tempfile
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
@@ -290,9 +289,8 @@ class _SesionFalsa:
 class TestExtraccionHTTP(unittest.TestCase):
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        etl_bdns._BDNS_MEM_CACHE = None
         self.parches = [
-            patch.object(etl_bdns, "BDNS_RAW_DIR", self.tmp.name),
             patch.object(etl_bdns, "BDNS_PAUSA_SEG", 0),
             patch.object(etl_bdns, "BDNS_REGIONES", [26]),
             patch.object(etl_bdns, "BDNS_MAX_DETALLES", 150),
@@ -304,7 +302,7 @@ class TestExtraccionHTTP(unittest.TestCase):
     def tearDown(self):
         for p in self.parches:
             p.stop()
-        self.tmp.cleanup()
+        etl_bdns._BDNS_MEM_CACHE = None
 
     def test_pagina_filtra_y_pide_solo_detalles_relevantes(self):
         sesion = _SesionFalsa()
@@ -316,10 +314,10 @@ class TestExtraccionHTTP(unittest.TestCase):
         self.assertEqual(sesion.detalles_pedidos(), ["D", "A", "C"])
         self.assertEqual(sorted(c["codigo_bdns"] for c in resultado), ["A", "C", "D"])
 
-    def test_guarda_copia_cruda_en_data_raw(self):
+    def test_guarda_copia_en_memoria(self):
         etl_bdns.fetch_bdns_convocatorias_api(["La Hiruela"], force_refresh=True, sesion=_SesionFalsa())
-        with open(os.path.join(self.tmp.name, etl_bdns.BDNS_CACHE_FILE), encoding="utf-8") as fh:
-            copia = json.load(fh)
+        copia = etl_bdns.cargar_cache()
+        self.assertIsNotNone(copia)
         self.assertEqual(copia["total_busqueda"], 5)
         self.assertEqual(len(copia["detalles"]), 3)
         self.assertIn("fecha_extraccion", copia)

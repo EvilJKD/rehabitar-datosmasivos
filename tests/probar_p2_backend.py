@@ -6,7 +6,7 @@ Necesita un PostgreSQL temporal (sin volume, se borra al pararlo):
     docker run --rm -d --name p2_test -p 5433:5432 -e POSTGRES_USER=rehabitar \
         -e POSTGRES_PASSWORD=rehabitar_pwd -e POSTGRES_DB=rehabitar_db postgres:15
 Ejecución:
-    python etl/p2_ine/probar_p2_backend.py
+    python tests/probar_p2_backend.py
 
 Ojo: al arrancar, el script hace DROP y vuelve a crear en esta BD de prueba la tabla municipios
 (versión provisional, solo dos columnas) y demografia_anual (ejecutando directamente el bloque de
@@ -20,7 +20,7 @@ import os
 import sys
 from pathlib import Path
 
-RAIZ = Path(__file__).resolve().parents[2]
+RAIZ = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(RAIZ / "backend"), str(RAIZ / "etl")]
 
 # El ETL (psycopg2) lee estas variables de entorno; el backend (asyncpg) usa la URL que montamos abajo. Los dos van contra la misma BD de prueba.

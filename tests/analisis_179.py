@@ -7,7 +7,7 @@ Los cálculos reutilizan tal cual calcular_indicadores() de backend/services/p2_
 así que los resultados siguen el mismo criterio que la API del backend. Solo lectura: se limita
 a descargar los datos del INE e imprimirlos.
 
-    python etl/p2_ine/analisis_179.py
+    python tests/analisis_179.py
 """
 
 import statistics
@@ -16,10 +16,14 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
-RAIZ = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(RAIZ / "backend"))
+RAIZ = Path(__file__).resolve().parents[1]
+sys.path[:0] = [
+    str(RAIZ / "backend"),
+    str(RAIZ / "etl"),
+    str(Path(__file__).resolve().parent),
+]
 
-from etl_ine import TABLA_POBLACION_TOTAL, fetch_ine_series_api  # noqa: E402
+from p2_ine.etl_ine import TABLA_POBLACION_TOTAL, fetch_ine_series_api  # noqa: E402
 from services import p2_demo_service as p2  # noqa: E402
 from verificar_codigos import municipios_desde_ine  # noqa: E402
 

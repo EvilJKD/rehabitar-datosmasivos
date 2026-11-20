@@ -6,7 +6,6 @@ import re
 from functools import lru_cache
 from io import BytesIO
 from math import cos, radians
-from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
@@ -47,14 +46,14 @@ def _download(url: str) -> bytes:
         raise SourceError(f"No se pudo consultar {source}: {exc}") from exc
 
 
-def _open_workbook(url: str, file: str | None):
-    content = Path(file).read_bytes() if file else _download(url)
+def _open_workbook(url: str):
+    content = _download(url)
     return load_workbook(BytesIO(content), read_only=True, data_only=True, keep_links=False)
 
 
 def fetch_municipios_ign_api() -> list[dict]:
     """Lee la publicación municipal del IGN derivada del NGMEP."""
-    book = _open_workbook(IGN_MUNICIPIOS_URL, os.getenv("P1_IGN_FILE"))
+    book = _open_workbook(IGN_MUNICIPIOS_URL)
     municipios = {}
     try:
         rows = book["IGN_INFOGEO_MUNICIPIOS"].values
@@ -99,8 +98,8 @@ def _percentage(value, codigo: str) -> float:
 
 
 @lru_cache(maxsize=1)
-def _read_coverage(file: str | None) -> dict[str, tuple[object, object]]:
-    book = _open_workbook(COBERTURA_URL, file)
+def _read_coverage() -> dict[str, tuple[object, object]]:
+    book = _open_workbook(COBERTURA_URL)
     try:
         rows = book["Municipio_%hogar"].values
         headers = [" ".join(str(cell).split()) for cell in next(rows)]
@@ -116,7 +115,7 @@ def _read_coverage(file: str | None) -> dict[str, tuple[object, object]]:
 
 
 def get_coverage(codigo_ine: str) -> tuple[float, float]:
-    coverage = _read_coverage(os.getenv("P1_COBERTURA_FILE"))
+    coverage = _read_coverage()
     try:
         fiber, mobile = coverage[codigo_ine]
     except KeyError as exc:

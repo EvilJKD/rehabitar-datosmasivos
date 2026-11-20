@@ -124,20 +124,36 @@ if _HAS_FASTAPI:
     )
 
 
+def _is_numeric_weight(val: Any) -> bool:
+    return isinstance(val, (int, float)) and not isinstance(val, bool)
+
+
 def _build_custom_weights(
     w_demo: Optional[float] = None,
     w_health: Optional[float] = None,
     w_grants: Optional[float] = None,
     w_infra: Optional[float] = None,
+    w_carretera: Optional[float] = None,
+    w_sanidad: Optional[float] = None,
+    w_conectividad: Optional[float] = None,
+    w_hidrico: Optional[float] = None,
+    w_demografia: Optional[float] = None,
 ) -> Optional[Dict[str, float]]:
     """Traduce los query params del API al diccionario de pesos de `evaluate_wlc_for_municipio`."""
     custom: Dict[str, float] = {}
-    if w_demo is not None:
-        custom["w_demo"] = w_demo
-    if w_health is not None:
-        custom["w_health"] = w_health
-    if w_infra is not None:
-        custom["w_infra"] = w_infra
+    mapping = {
+        "w_demo": w_demo,
+        "w_health": w_health,
+        "w_infra": w_infra,
+        "w_carretera": w_carretera,
+        "w_sanidad": w_sanidad,
+        "w_conectividad": w_conectividad,
+        "w_hidrico": w_hidrico,
+        "w_demografia": w_demografia,
+    }
+    for key, val in mapping.items():
+        if _is_numeric_weight(val):
+            custom[key] = float(val)
     return custom or None
 
 
@@ -244,6 +260,11 @@ async def list_municipios(
     w_health: Optional[float] = Query(None, ge=0.0, le=1.0),
     w_grants: Optional[float] = Query(None, ge=0.0, le=1.0),
     w_infra: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_carretera: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_sanidad: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_conectividad: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_hidrico: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_demografia: Optional[float] = Query(None, ge=0.0, le=1.0),
     db: AsyncSession = Depends(get_db),
 ) -> List[MunicipioListItemSchema]:
     """
@@ -255,7 +276,17 @@ async def list_municipios(
     demo_by_ine = await get_demografia_summary_all(db)
     health_by_ine = await get_nearest_emergency_all(db)
     grants_by_ine = await get_grants_summary_all(db)
-    custom_weights = _build_custom_weights(w_demo, w_health, w_grants, w_infra)
+    custom_weights = _build_custom_weights(
+        w_demo=w_demo,
+        w_health=w_health,
+        w_grants=w_grants,
+        w_infra=w_infra,
+        w_carretera=w_carretera,
+        w_sanidad=w_sanidad,
+        w_conectividad=w_conectividad,
+        w_hidrico=w_hidrico,
+        w_demografia=w_demografia,
+    )
 
     items: List[MunicipioListItemSchema] = []
     for m in municipios:
@@ -351,6 +382,11 @@ async def get_municipio_detail(
     w_health: Optional[float] = Query(None, ge=0.0, le=1.0),
     w_grants: Optional[float] = Query(None, ge=0.0, le=1.0),
     w_infra: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_carretera: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_sanidad: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_conectividad: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_hidrico: Optional[float] = Query(None, ge=0.0, le=1.0),
+    w_demografia: Optional[float] = Query(None, ge=0.0, le=1.0),
     db: AsyncSession = Depends(get_db),
 ) -> MunicipioDetailSchema:
     """
@@ -419,7 +455,17 @@ async def get_municipio_detail(
         else None
     )
 
-    custom_weights = _build_custom_weights(w_demo, w_health, w_grants, w_infra)
+    custom_weights = _build_custom_weights(
+        w_demo=w_demo,
+        w_health=w_health,
+        w_grants=w_grants,
+        w_infra=w_infra,
+        w_carretera=w_carretera,
+        w_sanidad=w_sanidad,
+        w_conectividad=w_conectividad,
+        w_hidrico=w_hidrico,
+        w_demografia=w_demografia,
+    )
     wlc_schema: Optional[WLCBreakdownSchema] = None
     if infra_schema is not None and demo is not None:
         var_10a = demo.get("variacion_10a_pct")
@@ -541,6 +587,7 @@ async def list_convocatorias(
         None, description="Filtrar por finalidad/categoría de la convocatoria (ej. 'Infraestructuras', 'vivienda')"
     ),
     solo_abiertas: bool = Query(True, description="Si es True, solo convocatorias con el plazo abierto hoy"),
+    abierta: Optional[bool] = Query(None, description="Alias de solo_abiertas para compatibilidad con el frontend"),
     db: AsyncSession = Depends(get_db),
 ) -> List[ConvocatoriaMunicipioItemSchema]:
     """
@@ -548,8 +595,9 @@ async def list_convocatorias(
     convocante, presupuesto, fin de plazo y la regla por la que se asignaron
     (`organo_local | umbral_poblacion | region_completa`). Sin `codigo_ine`, lista el catálogo completo.
     """
+    effective_solo_abiertas = solo_abiertas if (abierta is None or not isinstance(abierta, bool)) else abierta
     return await get_convocatorias(
-        db, codigo_ine=codigo_ine, categoria=categoria, solo_abiertas=solo_abiertas
+        db, codigo_ine=codigo_ine, categoria=categoria, solo_abiertas=effective_solo_abiertas
     )
 
 
