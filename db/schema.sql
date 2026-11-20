@@ -3,30 +3,30 @@
 -- Alineado con las Secciones 4, 5.2, 6.3, 6.5, 7.1, 7.2, 7.3 y 9 de la Propuesta
 -- =============================================================================
 
--- TODO 0: Habilitar la extensión espacial PostGIS
--- CREATE EXTENSION IF NOT EXISTS postgis;
+-- TODO 0 (Completado por P3): Habilitar la extensión espacial PostGIS
+CREATE EXTENSION IF NOT EXISTS postgis;
 -- (En despliegue distribuido Citus: CREATE EXTENSION IF NOT EXISTS citus;)
 
 
 -- =============================================================================
--- TODO 1 (Responsable P1): Tabla `municipios` (Entidad Maestra - Sección 7.1.1)
+-- P1: Tabla `municipios` (Entidad Maestra - Sección 7.1.1)
 -- Rol en Citus: Reference Table (o Distributed Table líder por `codigo_ine`)
 -- =============================================================================
--- Debe almacenar las entidades municipales de la Comunidad de Madrid:
---   - codigo_ine VARCHAR(5) PRIMARY KEY                 -- Ej. '28078' (Madarcos)
---   - nombre VARCHAR(120) NOT NULL                      -- Ej. 'Madarcos'
---   - provincia VARCHAR(80) NOT NULL DEFAULT 'Madrid'
---   - comarca VARCHAR(100) NOT NULL DEFAULT 'Sierra Norte'
---   - latitud DOUBLE PRECISION NOT NULL CHECK (latitud BETWEEN -90 AND 90)
---   - longitud DOUBLE PRECISION NOT NULL CHECK (longitud BETWEEN -180 AND 180)
---   - geom geometry(Point, 4326) NOT NULL               -- Punto PostGIS WGS84
---   - hidratado BOOLEAN NOT NULL DEFAULT FALSE          -- Control de Ingesta Híbrida Materializada
---   - fecha_hidratacion TIMESTAMP WITH TIME ZONE        -- Fecha de carga bajo demanda en BD
---   - created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
---
--- Índices a crear:
---   - Índice espacial GiST: CREATE INDEX IF NOT EXISTS idx_municipios_geom ON municipios USING GIST (geom);
---   - Índice B-Tree de estado: CREATE INDEX IF NOT EXISTS idx_municipios_provincia_hidratado ON municipios (provincia, hidratado);
+CREATE TABLE IF NOT EXISTS municipios (
+    codigo_ine VARCHAR(5) PRIMARY KEY CHECK (codigo_ine ~ '^[0-9]{5}$'),
+    nombre VARCHAR(120) NOT NULL,
+    provincia VARCHAR(80) NOT NULL DEFAULT 'Madrid',
+    comarca VARCHAR(100) NOT NULL DEFAULT 'Sin clasificar',
+    latitud DOUBLE PRECISION NOT NULL CHECK (latitud BETWEEN -90 AND 90),
+    longitud DOUBLE PRECISION NOT NULL CHECK (longitud BETWEEN -180 AND 180),
+    geom geometry(Point, 4326) NOT NULL,
+    hidratado BOOLEAN NOT NULL DEFAULT FALSE,
+    fecha_hidratacion TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_municipios_geom ON municipios USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_municipios_provincia_hidratado ON municipios (provincia, hidratado);
 
 
 -- =============================================================================
@@ -50,22 +50,20 @@
 
 
 -- =============================================================================
--- TODO 3 (Responsable P1): Tabla `metricas_infraestructura` (Sección 7.1.3)
+-- P1: Tabla `metricas_infraestructura` (Sección 7.1.3)
 -- Rol en Citus: Distributed Table (shard key: `codigo_ine`, co-localizada con `demografia_anual`)
 -- =============================================================================
--- REGLA ESTRICTA DE LA PROPUESTA (Sección 6.3 y 7.3):
---   "El tiempo de trayecto hacia el punto sanitario NO se almacena en ninguna tabla
---    para evitar obsolescencia." Por tanto, esta tabla SOLO guarda indicadores físicos
---   y digitales estáticos consolidados:
---   - codigo_ine VARCHAR(5) PRIMARY KEY REFERENCES municipios(codigo_ine) ON DELETE CASCADE
---   - distancia_carretera_km NUMERIC(6, 2) NOT NULL DEFAULT 0.00       -- Indicador 1 WLC (Acceso por carretera asfaltada)
---   - distancia_recurso_hidrico_km NUMERIC(6, 2) NOT NULL DEFAULT 0.00 -- Indicador 4 WLC (Acceso a recursos hídricos)
---   - cobertura_fibra_pct NUMERIC(5, 2) NOT NULL DEFAULT 0.00          -- Indicador 3 WLC y Filtro de Consulta 1
---   - cobertura_movil_pct NUMERIC(5, 2) NOT NULL DEFAULT 0.00          -- Indicador 3 WLC (Conectividad móvil 4G/5G)
---   - fecha_actualizacion DATE NOT NULL DEFAULT CURRENT_DATE
---
--- Índice parcial para acelerar Consulta 1 (municipios con cobertura de fibra):
---   - CREATE INDEX IF NOT EXISTS idx_infra_cobertura_fibra ON metricas_infraestructura (cobertura_fibra_pct) WHERE cobertura_fibra_pct > 0;
+CREATE TABLE IF NOT EXISTS metricas_infraestructura (
+    codigo_ine VARCHAR(5) PRIMARY KEY REFERENCES municipios(codigo_ine) ON DELETE CASCADE,
+    distancia_carretera_km NUMERIC(6, 2) NOT NULL CHECK (distancia_carretera_km >= 0),
+    distancia_recurso_hidrico_km NUMERIC(6, 2) NOT NULL CHECK (distancia_recurso_hidrico_km >= 0),
+    cobertura_fibra_pct NUMERIC(5, 2) NOT NULL CHECK (cobertura_fibra_pct BETWEEN 0 AND 100),
+    cobertura_movil_pct NUMERIC(5, 2) NOT NULL CHECK (cobertura_movil_pct BETWEEN 0 AND 100),
+    fecha_actualizacion DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+CREATE INDEX IF NOT EXISTS idx_infra_cobertura_fibra
+    ON metricas_infraestructura (cobertura_fibra_pct) WHERE cobertura_fibra_pct > 0;
 
 
 -- =============================================================================

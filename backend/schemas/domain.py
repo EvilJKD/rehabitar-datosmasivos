@@ -22,16 +22,7 @@ class WLCBreakdownSchema(BaseModel):
     pass
 
 
-class InfraestructuraSchema(BaseModel):
-    """
-    TODO (Responsable P1 - Sección 7.1.3):
-    - distancia_carretera_km: float
-    - distancia_recurso_hidrico_km: float
-    - cobertura_fibra_pct: float
-    - cobertura_movil_pct: float
-    - fecha_actualizacion: date
-    """
-    pass
+from .p1_geo import InfraestructuraSchema
 
 
 class RutaSanitariaSchema(BaseModel):

@@ -1,22 +1,51 @@
-# 📋 TODO List — Módulo ETL P1: API Pública IGN / NGBE (`etl/p1_ngbe/`)
+# Módulo P1 · Catálogo municipal e infraestructura
 
-> **Responsable:** Desarrollador P1
-> **Fuente Pública Oficial (Sección 3 y 6.2.2):** Servicio WFS INSPIRE / NGBE del Instituto Geográfico Nacional (IGN).
-> **Archivo a completar:** `etl_ngbe.py`
+Desde la raíz del repositorio, con Docker Desktop en marcha:
 
-## Paso a Paso para Completar `etl_ngbe.py`
+```powershell
+docker compose up -d --build --wait db
+docker compose run --build --rm etl_runner python p1_ngbe/etl_ngbe.py
+```
 
-- [ ] **Paso 1: Implementar `get_db_connection()`**
-  - Conectar a PostgreSQL con `psycopg2` leyendo las variables de entorno `POSTGRES_*`.
+La carga registra los puntos de los municipios de la Comunidad de Madrid. Se puede
+repetir sin duplicar municipios ni cambiar su estado de hidratación.
 
-- [ ] **Paso 2: Implementar `fetch_municipios_ign_api()` (Conexión directa a API del IGN)**
-  - Realizar una petición `requests.get(...)` al servicio público WFS del IGN (`https://www.ign.es/wfs-inspire/unidades-administrativas` o WFS NGBE) solicitando formato `application/json` (GeoJSON) o GML para los municipios de la Comunidad de Madrid (`28xxx`).
-  - Parsear cada *feature* para extraer `codigo_ine`, `nombre`, `provincia` (`"Madrid"`), `latitud` y `longitud`.
+Para cargar también las métricas de un municipio, añade `--seed` con su código INE.
+Puedes repetir el argumento para varios municipios.
 
-- [ ] **Paso 3: Implementar `ingest_infraestructura_municipio(codigo_ine, conn=None)` (Fase 2 - Bajo Demanda)**
-  - Obtener los indicadores físicos y digitales del municipio (`distancia_carretera_km`, `distancia_recurso_hidrico_km`, `cobertura_fibra_pct`, `cobertura_movil_pct`) desde las fuentes públicas abiertas e insertarlos en la tabla `metricas_infraestructura` (`ON CONFLICT (codigo_ine) DO UPDATE`).
+```powershell
+docker compose run --rm etl_runner python p1_ngbe/etl_ngbe.py --seed 28078 --seed 28069
+```
 
-- [ ] **Paso 4: Implementar `run_etl_p1(seed_codes=None)` (Fase 1 - Carga Inicial)**
-  - Llamar a `fetch_municipios_ign_api()`.
-  - Insertar todos los municipios devueltos por la API en la tabla `municipios` con su geometría PostGIS `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)` y `hidratado = FALSE`.
-  - Si `seed_codes` está definido, hidratar inicialmente solo las métricas de infraestructura de esos códigos semilla.
+`28078` corresponde a Madarcos y `28069` a La Hiruela.
+
+Si PostgreSQL ya se había inicializado antes de incorporar P1, aplica el esquema
+sobre el volumen existente antes de ejecutar el ETL. Este ejemplo usa el usuario
+y la base de datos por defecto del proyecto.
+
+```powershell
+Get-Content -Raw -Encoding UTF8 db/schema.sql | docker compose exec -T db psql -v ON_ERROR_STOP=1 -U rehabitar -d rehabitar_db
+```
+
+## Fuentes y métricas
+
+- **Catálogo municipal.** Obra derivada del NGMEP, CC BY 4.0 Instituto Geográfico
+  Nacional. Se usa la [publicación municipal del Atlas Nacional de España](https://www.ign.es/resources/ane/Informacion_Geografica_Destacada/IGN_INFOGEO_MUNICIPIOS.html).
+  La columna «Ver en mapa» proporciona las coordenadas de referencia que se guardan
+  como `Point(4326)`. La etiqueta Sierra Norte indica pertenencia a la
+  [mancomunidad publicada por la Comunidad de Madrid](https://www.comunidad.madrid/centros/mancomunidad-interes-general-servicios-sierra-norte).
+- **Cobertura.** FTTH y 4G municipales en junio de 2025, expresadas de 0 a 100.
+  Se usa la hoja municipal por hogares del [informe de cobertura de SETELECO](https://digital.gob.es/telecomunicaciones-infraestructuras-digitales/areas-interes/banda-ancha/informacion-cobertura/informes-cobertura/informe-cobertura-2025).
+- **Distancias.** Distancias geodésicas desde el punto municipal a la vía
+  pavimentada y al curso de agua natural permanente más próximos de las capas
+  consultadas. Se usan las colecciones
+  [Road Link](https://api-features.idee.es/collections/roadlink) y
+  [Watercourse](https://api-features.idee.es/collections/watercourse) del IGN.
+
+`P1_IGN_FILE` y `P1_COBERTURA_FILE` permiten usar copias locales de los Excel
+oficiales. `P1_HTTP_TIMEOUT` configura el tiempo máximo de espera en segundos.
+
+El servicio de P1 consulta las tablas con la sesión asíncrona proporcionada por
+FastAPI. La primera consulta de infraestructura pide las métricas al ETL y las
+persiste. Las consultas siguientes reutilizan los valores guardados. El
+orquestador general es quien cambia el estado de hidratación del municipio.

@@ -4,22 +4,31 @@ Modelos ORM de SQLAlchemy alineados con el esquema normalizado y Citus-Ready (`d
 
 from core.database import Base
 
+import sqlalchemy as sa
+
+
+class PuntoWGS84(sa.types.UserDefinedType):
+    cache_ok = True
+
+    def get_col_spec(self, **kwargs):
+        return "geometry(Point, 4326)"
+
 
 class Municipio(Base):
-    """
-    TODO (Responsable P1): Mapear la tabla `municipios` (Sección 7.1.1):
-    - codigo_ine (PK, String(5))
-    - nombre (String(120))
-    - provincia (String(80), default='Madrid')
-    - comarca (String(100), default='Sierra Norte')
-    - latitud (Float)
-    - longitud (Float)
-    - hidratado (Boolean, default=False)
-    - fecha_hidratacion (DateTime)
-    - created_at (DateTime)
-    """
+    """Catálogo maestro de municipios del IGN."""
+
     __tablename__ = "municipios"
-    pass
+
+    codigo_ine = sa.Column(sa.String(5), primary_key=True)
+    nombre = sa.Column(sa.String(120), nullable=False)
+    provincia = sa.Column(sa.String(80), nullable=False, server_default="Madrid")
+    comarca = sa.Column(sa.String(100), nullable=False, server_default="Sin clasificar")
+    latitud = sa.Column(sa.Double, nullable=False)
+    longitud = sa.Column(sa.Double, nullable=False)
+    geom = sa.Column(PuntoWGS84(), nullable=False)
+    hidratado = sa.Column(sa.Boolean, nullable=False, server_default=sa.false())
+    fecha_hidratacion = sa.Column(sa.DateTime(timezone=True))
+    created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
 class DemografiaAnual(Base):
@@ -37,17 +46,18 @@ class DemografiaAnual(Base):
 
 
 class MetricaInfraestructura(Base):
-    """
-    TODO (Responsable P1): Mapear la tabla distribuida `metricas_infraestructura` (Sección 7.1.3):
-    - codigo_ine (PK, FK -> municipios.codigo_ine, String(5))
-    - distancia_carretera_km (Numeric(6, 2))
-    - distancia_recurso_hidrico_km (Numeric(6, 2))
-    - cobertura_fibra_pct (Numeric(5, 2))
-    - cobertura_movil_pct (Numeric(5, 2))
-    - fecha_actualizacion (Date)
-    """
+    """Métricas físicas y de conectividad persistidas por P1."""
+
     __tablename__ = "metricas_infraestructura"
-    pass
+
+    codigo_ine = sa.Column(
+        sa.String(5), sa.ForeignKey("municipios.codigo_ine", ondelete="CASCADE"), primary_key=True
+    )
+    distancia_carretera_km = sa.Column(sa.Numeric(6, 2), nullable=False)
+    distancia_recurso_hidrico_km = sa.Column(sa.Numeric(6, 2), nullable=False)
+    cobertura_fibra_pct = sa.Column(sa.Numeric(5, 2), nullable=False)
+    cobertura_movil_pct = sa.Column(sa.Numeric(5, 2), nullable=False)
+    fecha_actualizacion = sa.Column(sa.Date, nullable=False, server_default=sa.func.current_date())
 
 
 class CentroSanitario(Base):

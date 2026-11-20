@@ -1,64 +1,124 @@
 #!/usr/bin/env python3
+"""ETL municipal del IGN e infraestructura de P1."""
+
+import argparse
+import os
+import re
+from contextlib import closing
+
+import psycopg2
+from psycopg2.extras import RealDictCursor, execute_values
+
+if __package__:
+    from .sources import fetch_municipios_ign_api, get_coverage, get_infrastructure_lines
+else:
+    from sources import fetch_municipios_ign_api, get_coverage, get_infrastructure_lines
+
+
+UPSERT_MUNICIPIOS = """
+    INSERT INTO municipios (codigo_ine, nombre, provincia, comarca, latitud, longitud, geom)
+    VALUES %s
+    ON CONFLICT (codigo_ine) DO UPDATE SET
+        nombre = EXCLUDED.nombre,
+        provincia = EXCLUDED.provincia,
+        comarca = EXCLUDED.comarca,
+        latitud = EXCLUDED.latitud,
+        longitud = EXCLUDED.longitud,
+        geom = EXCLUDED.geom
 """
-Módulo ETL P1 - Nomenclátor Geográfico Básico de España (NGBE / WFS IGN)
-Responsable: Desarrollador P1
 
-Objetivo:
-Conectarse directamente a los servicios públicos WFS/REST del Instituto Geográfico
-Nacional (IGN) para extraer el directorio oficial de municipios de la Comunidad de
-Madrid (`codigo_ine` 28xxx, nombre y coordenadas oficiales) e insertarlos en la
-tabla `municipios` con geometría PostGIS `Point(4326)`.
+MUNICIPIO_VALUES = """
+    (%(codigo_ine)s, %(nombre)s, %(provincia)s, %(comarca)s, %(latitud)s, %(longitud)s,
+     ST_SetSRID(ST_MakePoint(%(longitud)s, %(latitud)s), 4326))
+"""
 
-Ejecución aislada:
-    python etl/p1_ngbe/etl_ngbe.py
+UPSERT_INFRAESTRUCTURA = """
+    INSERT INTO metricas_infraestructura (
+        codigo_ine, distancia_carretera_km, distancia_recurso_hidrico_km,
+        cobertura_fibra_pct, cobertura_movil_pct, fecha_actualizacion
+    )
+    SELECT codigo_ine,
+           ST_Distance(geom::geography, ST_GeomFromGeoJSON(%s)::geography) / 1000,
+           ST_Distance(geom::geography, ST_GeomFromGeoJSON(%s)::geography) / 1000,
+           %s, %s, CURRENT_DATE
+    FROM municipios
+    WHERE codigo_ine = %s
+    ON CONFLICT (codigo_ine) DO UPDATE SET
+        distancia_carretera_km = EXCLUDED.distancia_carretera_km,
+        distancia_recurso_hidrico_km = EXCLUDED.distancia_recurso_hidrico_km,
+        cobertura_fibra_pct = EXCLUDED.cobertura_fibra_pct,
+        cobertura_movil_pct = EXCLUDED.cobertura_movil_pct,
+        fecha_actualizacion = EXCLUDED.fecha_actualizacion
+    RETURNING codigo_ine, distancia_carretera_km::double precision,
+              distancia_recurso_hidrico_km::double precision,
+              cobertura_fibra_pct::double precision, cobertura_movil_pct::double precision,
+              fecha_actualizacion
 """
 
 
 def get_db_connection():
-    """
-    TODO: Crear y devolver una conexión `psycopg2` a PostgreSQL leyendo las
-    variables de entorno (POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER,
-    POSTGRES_PASSWORD, POSTGRES_DB).
-    """
-    pass
-
-
-def fetch_municipios_ign_api() -> list[dict]:
-    """
-    TODO: Realizar la petición HTTP en vivo al servicio público WFS INSPIRE / NGBE del IGN
-    (por ejemplo `https://www.ign.es/wfs-inspire/unidades-administrativas` o servicio NGBE)
-    filtrando las entidades municipales de la Comunidad de Madrid (provincia 28).
-    Parsear la respuesta GeoJSON / GML devuelta por el IGN para extraer:
-    - `codigo_ine` (5 dígitos, ej. '28078')
-    - `nombre` (ej. 'Madarcos')
-    - `provincia` ('Madrid')
-    - `latitud` y `longitud` (en EPSG:4326)
-    """
-    pass
+    dsn = os.getenv("DATABASE_URL_SYNC")
+    if dsn:
+        return psycopg2.connect(dsn, connect_timeout=10)
+    return psycopg2.connect(
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=os.getenv("POSTGRES_PORT", "5432"),
+        user=os.getenv("POSTGRES_USER", "rehabitar"),
+        password=os.getenv("POSTGRES_PASSWORD", "rehabitar_pwd"),
+        dbname=os.getenv("POSTGRES_DB", "rehabitar_db"),
+        connect_timeout=10,
+    )
 
 
 def ingest_infraestructura_municipio(codigo_ine: str, conn=None) -> dict:
-    """
-    TODO (Fase 2 - Hidratación Bajo Demanda):
-    Consultar las fuentes públicas de telecomunicaciones / hidrología / red viaria
-    para el `codigo_ine` seleccionado e insertar sus indicadores en la tabla
-    `metricas_infraestructura` (`distancia_carretera_km`, `distancia_recurso_hidrico_km`,
-    `cobertura_fibra_pct`, `cobertura_movil_pct`, `fecha_actualizacion`).
-    """
-    pass
+    """Actualiza las métricas usando la transacción del llamante si proporciona una."""
+    if not re.fullmatch(r"28[0-9]{3}", codigo_ine):
+        raise ValueError(f"Código INE de Madrid inválido: {codigo_ine!r}.")
+    if conn is None:
+        with closing(get_db_connection()) as owned_connection, owned_connection:
+            return _ingest_infraestructura(codigo_ine, owned_connection)
+    return _ingest_infraestructura(codigo_ine, conn)
+
+
+def _ingest_infraestructura(codigo_ine: str, conn) -> dict:
+    with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+        cursor.execute(
+            "SELECT latitud, longitud FROM municipios WHERE codigo_ine = %s",
+            (codigo_ine,),
+        )
+        municipio = cursor.fetchone()
+        if municipio is None:
+            raise LookupError(f"No existe el municipio {codigo_ine} en el catálogo del IGN.")
+
+        fibra, movil = get_coverage(codigo_ine)
+        carreteras, agua = get_infrastructure_lines(municipio["latitud"], municipio["longitud"])
+        cursor.execute(UPSERT_INFRAESTRUCTURA, (carreteras, agua, fibra, movil, codigo_ine))
+        metricas = cursor.fetchone()
+        if metricas is None:
+            raise LookupError(f"El municipio {codigo_ine} ya no existe en el catálogo.")
+        return dict(metricas)
 
 
 def run_etl_p1(seed_codes: list[str] | None = None) -> str:
-    """
-    TODO (Fase 1 - Carga Inicial desde API del IGN):
-    1. Llamar a `fetch_municipios_ign_api()` para obtener en vivo los municipios desde el IGN.
-    2. Insertar los municipios en la tabla `municipios` construyendo el punto PostGIS con
-       `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)` y `hidratado = FALSE`.
-    3. Si hay `seed_codes`, llamar a `ingest_infraestructura_municipio` para esos códigos iniciales.
-    4. Imprimir: `[ETL P1-NGBE] Conectando a API IGN... Insertados municipios.`
-    """
-    pass
+    """Carga el catálogo y, si se indican, las métricas de los municipios semilla."""
+    municipios = fetch_municipios_ign_api()
+    codes = dict.fromkeys(seed_codes or [])
+    unknown = codes.keys() - {municipio["codigo_ine"] for municipio in municipios}
+    if unknown:
+        raise ValueError(f"Códigos semilla fuera del catálogo del IGN: {', '.join(sorted(unknown))}.")
+
+    with closing(get_db_connection()) as conn, conn, conn.cursor() as cursor:
+        execute_values(cursor, UPSERT_MUNICIPIOS, municipios, template=MUNICIPIO_VALUES)
+
+    print(f"[ETL P1-NGBE] {len(municipios)} municipios del IGN cargados en PostGIS.")
+    for codigo_ine in codes:
+        ingest_infraestructura_municipio(codigo_ine)
+    if codes:
+        print(f"[ETL P1-NGBE] Métricas de infraestructura cargadas para {len(codes)} municipios.")
+    return f"P1: {len(municipios)} municipios cargados y {len(codes)} con métricas actualizadas."
 
 
 if __name__ == "__main__":
-    run_etl_p1()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", action="append", metavar="CODIGO_INE", help="Cargar sus métricas")
+    run_etl_p1(parser.parse_args().seed)
