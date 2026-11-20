@@ -65,7 +65,8 @@
     - `CREATE INDEX IF NOT EXISTS idx_centros_sanitarios_geom ON centros_sanitarios USING GIST (geom);`
     - `CREATE INDEX IF NOT EXISTS idx_centros_urgencias_geom ON centros_sanitarios USING GIST (geom) WHERE tiene_urgencias = TRUE;`
 
-- [ ] **Paso 6 (P4): Crear las tablas `convocatorias` y `convocatoria_municipio` (Sección 7.1.5 y 7.1.6)**
+- [x] **Paso 6 (P4): Crear las tablas `convocatorias` y `convocatoria_municipio` (Sección 7.1.5 y 7.1.6)** — *Completado en la rama `P4`*
+  - Cambios respecto a lo previsto: `poblacion_max_objetivo` sin `DEFAULT 20000` (NULL = sin umbral), nuevas columnas `finalidad` (filtro `categoria`) y `fecha_extraccion`, e índices `idx_convocatorias_abiertas_fin`, `idx_convocatorias_organo` e `idx_convocatoria_municipio_bdns`.
   - Tabla `convocatorias` (*Reference Table*):
     - `codigo_bdns VARCHAR(30) PRIMARY KEY` (ej. `'921084'`)
     - `descripcion TEXT NOT NULL`

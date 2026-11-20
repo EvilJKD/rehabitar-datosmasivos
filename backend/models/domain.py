@@ -2,11 +2,12 @@
 Modelos ORM de SQLAlchemy alineados con el esquema normalizado y Citus-Ready (`db/schema.sql`).
 """
 
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, Numeric, SmallInteger, String
+from sqlalchemy import Boolean, Computed, Date, DateTime, Float, ForeignKey, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -92,33 +93,57 @@ class CentroSanitario(Base):
 
 class Convocatoria(Base):
     """
-    TODO (Responsable P4): Mapear la tabla de referencia `convocatorias` (Sección 7.1.5) y retirar `__abstract__ = True`:
-    - codigo_bdns (PK, String(30))
-    - descripcion (Text)
-    - organo_nivel1 (String(150))
-    - organo_nivel2 (String(150))
-    - organo_nivel3 (String(150))
-    - fecha_recepcion (Date)
-    - inicio_solicitud (Date)
-    - fin_solicitud (Date)
-    - abierta (Boolean)
-    - presupuesto_total (Numeric(14, 2))
-    - tipo_beneficiario (String(150))
-    - poblacion_max_objetivo (Integer)
-    - url_bases (Text)
+    Tabla de referencia `convocatorias` (Sección 7.1.5 - P4): catálogo de convocatorias de la BDNS.
+
+    Se corresponde columna a columna con la sección 5.1 de db/schema.sql:
+    - `organo_convocante` es una columna GENERATED de PostgreSQL; con `Computed` el ORM sabe que
+      no debe incluirla en los INSERT/UPDATE y solo la lee.
+    - `poblacion_max_objetivo` NULL = la convocatoria no tiene umbral de población.
+    - `finalidad` (añadida por P4) = `descripcionFinalidad` de la BDNS; alimenta el filtro `categoria`.
+    - Los CHECK e índices solo viven en schema.sql: la tabla la crea schema.sql, el ORM no usa create_all().
     """
-    __abstract__ = True
     __tablename__ = "convocatorias"
+
+    codigo_bdns: Mapped[str] = mapped_column(String(30), primary_key=True)
+    descripcion: Mapped[str] = mapped_column(Text, nullable=False)
+    organo_nivel1: Mapped[str] = mapped_column(String(150), nullable=False)
+    organo_nivel2: Mapped[Optional[str]] = mapped_column(String(150))
+    organo_nivel3: Mapped[Optional[str]] = mapped_column(String(150))
+    organo_convocante: Mapped[Optional[str]] = mapped_column(
+        Text, Computed("COALESCE(organo_nivel3, organo_nivel2, organo_nivel1)", persisted=True)
+    )
+    fecha_recepcion: Mapped[date] = mapped_column(Date, nullable=False)
+    inicio_solicitud: Mapped[Optional[date]] = mapped_column(Date)
+    fin_solicitud: Mapped[Optional[date]] = mapped_column(Date)
+    abierta: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    presupuesto_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    tipo_beneficiario: Mapped[Optional[str]] = mapped_column(String(150))
+    finalidad: Mapped[Optional[str]] = mapped_column(String(150))
+    poblacion_max_objetivo: Mapped[Optional[int]] = mapped_column(Integer)
+    url_bases: Mapped[Optional[str]] = mapped_column(Text)
+    fecha_extraccion: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ConvocatoriaMunicipio(Base):
     """
-    TODO (Responsable P4): Mapear la tabla distribuida `convocatoria_municipio` (Sección 7.1.6) y retirar `__abstract__ = True`:
-    - codigo_ine (PK compuesta 1/2, FK -> municipios.codigo_ine, String(5))
-    - codigo_bdns (PK compuesta 2/2, FK -> convocatorias.codigo_bdns, String(30))
-    - regla_asignacion (String(30): 'organo_local' | 'umbral_poblacion' | 'region_completa')
-    - fecha_asignacion (DateTime)
+    Tabla distribuida `convocatoria_municipio` (Sección 7.1.6 - P4): resultado de asignar cada
+    convocatoria a los municipios a los que aplica.
+
+    Clave primaria compuesta (codigo_ine, codigo_bdns), con codigo_ine primero (columna de reparto en Citus,
+    co-localizada con demografia_anual y metricas_infraestructura).
+    `regla_asignacion` ∈ {'organo_local', 'umbral_poblacion', 'region_completa'} (CHECK en schema.sql).
     """
-    __abstract__ = True
     __tablename__ = "convocatoria_municipio"
 
+    codigo_ine: Mapped[str] = mapped_column(
+        String(5),
+        ForeignKey("municipios.codigo_ine", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    codigo_bdns: Mapped[str] = mapped_column(
+        String(30),
+        ForeignKey("convocatorias.codigo_bdns", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    regla_asignacion: Mapped[str] = mapped_column(String(30), nullable=False)
+    fecha_asignacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

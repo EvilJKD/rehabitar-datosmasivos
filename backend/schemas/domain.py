@@ -2,6 +2,7 @@
 Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la Propuesta.
 """
 
+from datetime import date
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -82,23 +83,33 @@ class RutaSanitariaSchema(BaseModel):
 
 class ConvocatoriaMunicipioItemSchema(BaseModel):
     """
-    TODO (Responsable P4 - Consulta 4 y Sección 7.1.5 / 7.1.6):
-    - codigo_bdns: str (ej. '921084')
-    - descripcion: str
-    - organo_nivel1: str
-    - organo_nivel2: Optional[str]
-    - organo_nivel3: Optional[str]
-    - organo_convocante: str
-    - fecha_recepcion: date
-    - inicio_solicitud: Optional[date]
-    - fin_solicitud: Optional[date]
-    - abierta: bool
-    - presupuesto_total: float
-    - tipo_beneficiario: Optional[str]
-    - url_bases: Optional[str]
-    - regla_asignacion: Optional[str] ('organo_local' | 'umbral_poblacion' | 'region_completa')
+    Responsable P4 - Consulta 4 y Sección 7.1.5 / 7.1.6.
+    Una convocatoria de la BDNS y, si se consulta para un municipio, la regla por la que se le asignó.
+
+    Respecto a la descripción original se añaden `finalidad` (categoría, filtro `categoria`) y
+    `poblacion_max_objetivo` (umbral de habitantes extraído del texto; None = sin umbral).
+    `regla_asignacion` es None cuando se listan convocatorias sin filtrar por municipio.
     """
-    pass
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo_bdns: str = Field(..., description="Código BDNS de la convocatoria (ej. '921084')")
+    descripcion: str
+    organo_nivel1: str = Field(..., description="'ESTADO', 'AUTONOMICA', 'LOCAL' u 'OTROS'")
+    organo_nivel2: Optional[str] = None
+    organo_nivel3: Optional[str] = None
+    organo_convocante: str = Field(..., description="Órgano más específico (nivel3 > nivel2 > nivel1)")
+    fecha_recepcion: date
+    inicio_solicitud: Optional[date] = None
+    fin_solicitud: Optional[date] = Field(None, description="Fin del plazo de solicitud (None = no publicado)")
+    abierta: bool
+    presupuesto_total: float = Field(..., ge=0)
+    tipo_beneficiario: Optional[str] = None
+    finalidad: Optional[str] = Field(None, description="Categoría BDNS (ej. 'Infraestructuras')")
+    poblacion_max_objetivo: Optional[int] = Field(None, description="Umbral de habitantes (None = sin umbral)")
+    url_bases: Optional[str] = None
+    regla_asignacion: Optional[str] = Field(
+        None, description="'organo_local' | 'umbral_poblacion' | 'region_completa' (solo al filtrar por municipio)"
+    )
 
 
 class MunicipioListItemSchema(BaseModel):
