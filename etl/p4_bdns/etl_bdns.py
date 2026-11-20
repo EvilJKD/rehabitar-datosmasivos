@@ -1,48 +1,7 @@
 #!/usr/bin/env python3
 """
-Módulo ETL P4 - API de la Base de Datos Nacional de Subvenciones (BDNS / SNPSAP)
-Responsable: Desarrollador P4
-
-Objetivo:
-Conectarse a la API REST pública del portal SNPSAP / BDNS
-(`https://www.infosubvenciones.es/bdnstrans/api/...`) para extraer las convocatorias
-de subvenciones con alcance en la Comunidad de Madrid, almacenarlas en `convocatorias`
-y aplicar las reglas de asignación territorial en `convocatoria_municipio`.
-
-Flujo (Extract → Transform → Load):
-
-  1. EXTRACT
-     a) Búsqueda paginada:  GET /convocatorias/busqueda?vpd=GE&regiones=<id>&fechaDesde=dd/mm/aaaa
-        Devuelve un resumen (número, descripción, órgano nivel1/2/3, fecha de recepción).
-        Región 26 = "ES30 - COMUNIDAD DE MADRID", región 27 = "ES300 - Madrid" (provincia).
-     b) Prefiltro sobre el resumen (sin pedir nada más a la API):
-        - AUTONOMICA solo si el órgano es la COMUNIDAD DE MADRID; ESTADO siempre;
-          LOCAL solo si el órgano es uno de nuestros municipios; el resto se descarta.
-        - Palabras clave del dominio (rural, municipios, habitantes, vivienda...) configurables.
-        - Tope BDNS_MAX_DETALLES de detalles a pedir (la BDNS avisa de que limita el acceso abusivo).
-     c) Detalle de cada convocatoria seleccionada: GET /convocatorias?numConv=XXXX&vpd=GE
-     d) Caché en memoria RAM (respaldo si la API cae dentro del mismo proceso).
-
-  2. TRANSFORM (normalizar_detalle)
-     - Fechas ISO; si la BDNS no publica fechaInicio/FinSolicitud, se interpretan los textos
-       libres `textInicio` / `textFin` ("HASTA 30 DE SEPTIEMBRE DE 2026").
-     - abierta = campo `abierto` de la BDNS Y fin de plazo no vencido.
-     - poblacion_max_objetivo: umbral "menos de / hasta N habitantes" extraído del texto.
-
-  3. LOAD
-     - upsert en `convocatorias` (ON CONFLICT (codigo_bdns) DO UPDATE).
-     - Reglas de asignación por municipio (asignar_convocatorias), por orden de prioridad:
-         R1 organo_local      → la convoca el propio ayuntamiento del municipio, o una ayuda estatal/autonómica
-                                 va dirigida a ese ayuntamiento ("Subvención al Ayuntamiento de X para ...").
-         R2 umbral_poblacion  → exige < N habitantes y el municipio (padrón INE, P2) está por debajo.
-         R3 region_completa   → autonómica de la Comunidad de Madrid o estatal, sin restricciones.
-     - upsert en `convocatoria_municipio` (ON CONFLICT (codigo_ine, codigo_bdns) DO UPDATE)
-       y `municipios.hidratado = TRUE`.
-
-Ejecución aislada:
-    python etl/p4_bdns/etl_bdns.py                       # todos los municipios de la BD
-    python etl/p4_bdns/etl_bdns.py 28070 28078           # solo esos municipios
-    python etl/p4_bdns/etl_bdns.py --dry-run --nombres "La Hiruela,Madarcos"   # sin BD: descarga y muestra
+Módulo ETL P4 para extraer convocatorias de subvenciones desde la API pública
+de la BDNS (SNPSAP), normalizarlas y asignarlas a municipios en PostgreSQL.
 """
 
 from __future__ import annotations
@@ -99,6 +58,7 @@ _MESES = {
 
 
 def log(msg: str) -> None:
+    """Imprime un mensaje de seguimiento en consola con el prefijo del ETL P4."""
     print(f"[ETL P4-BDNS] {msg}", flush=True)
 
 
@@ -107,11 +67,7 @@ def log(msg: str) -> None:
 # =============================================================================
 
 def get_db_connection():
-    """
-    Crea y devuelve una conexión `psycopg2` a PostgreSQL.
-    Usa DATABASE_URL_SYNC si existe (docker-compose la define); si no, las variables POSTGRES_*.
-    Desde el propio PC (fuera de Docker) POSTGRES_HOST debe valer `localhost`.
-    """
+    """Crea una conexión psycopg2 a PostgreSQL usando DATABASE_URL_SYNC o las variables POSTGRES_*."""
     import psycopg2  # import diferido: el modo --dry-run y las pruebas unitarias no lo necesitan
 
     url = os.getenv("DATABASE_URL_SYNC")
@@ -127,11 +83,11 @@ def get_db_connection():
 
 
 # =============================================================================
-# TRANSFORM: utilidades puras de normalización (sin red ni BD → fáciles de probar)
+# TRANSFORM: utilidades puras de normalización (sin red ni base de datos)
 # =============================================================================
 
 def normalizar_texto(valor: Any) -> str:
-    """Mayúsculas, sin tildes, sin signos de puntuación y con espacios simples."""
+    """Convierte un texto a mayúsculas sin tildes, sin puntuación y con espacios simples."""
     if valor is None:
         return ""
     texto = unicodedata.normalize("NFKD", str(valor))
@@ -141,10 +97,7 @@ def normalizar_texto(valor: Any) -> str:
 
 
 def normalizar_nombre_municipio(nombre: Any) -> str:
-    """
-    Normaliza nombres de municipio para poder compararlos entre fuentes:
-    'Hiruela, La' (INE) == 'HIRUELA (LA)' == 'La Hiruela' == 'LA HIRUELA' (BDNS).
-    """
+    """Normaliza el nombre de un municipio reordenando artículos pospuestos para compararlo entre fuentes."""
     if nombre is None:
         return ""
     bruto = str(nombre).strip()
@@ -156,7 +109,7 @@ def normalizar_nombre_municipio(nombre: Any) -> str:
 
 
 def _municipio_de_organo_local(nivel2: Any, nivel3: Any) -> set[str]:
-    """Nombres de municipio candidatos para una convocatoria LOCAL (nivel2 = municipio, nivel3 = 'AYUNTAMIENTO DE X')."""
+    """Extrae los posibles nombres de municipio a partir de nivel2 y nivel3 en convocatorias locales."""
     candidatos = set()
     if nivel2:
         candidatos.add(normalizar_nombre_municipio(nivel2))
@@ -174,11 +127,7 @@ _FIN_NOMBRE = {"PARA", "POR", "EN", "CON", "A", "Y", "E", "QUE", "SOBRE", "DESTI
 
 
 def municipios_destinatarios(descripcion: Any) -> set[str]:
-    """
-    Municipios concretos a los que va dirigida una convocatoria según su descripción, p. ej.
-    'Subvención al Ayuntamiento de Colmenar Viejo para ...' (BDNS 933369) → {'COLMENAR VIEJO'}.
-    'Ayudas a los ayuntamientos de la Comunidad' (plural) no nombra ninguno → set().
-    """
+    """Extrae los nombres de municipios destinatarios mencionados tras 'Ayuntamiento de' en la descripción."""
     palabras = normalizar_texto(descripcion).split()
     encontrados = set()
     for i in range(len(palabras) - 2):
@@ -195,12 +144,12 @@ def municipios_destinatarios(descripcion: Any) -> set[str]:
 
 
 def _nombre_coincide(nombre_norm: str, destinatarios: set[str]) -> bool:
-    """'LA HIRUELA' coincide con 'LA HIRUELA' y con 'LA HIRUELA MADRID' (texto que sigue al nombre)."""
+    """Comprueba si el nombre normalizado del municipio coincide exactamente o como prefijo con los destinatarios."""
     return any(d == nombre_norm or d.startswith(nombre_norm + " ") for d in destinatarios)
 
 
 def parse_fecha_iso(valor: Any) -> Optional[date]:
-    """'2026-07-23' (o '2026-07-23T00:00:00') → date. None si no es una fecha ISO."""
+    """Convierte una cadena de fecha ISO (YYYY-MM-DD) a objeto date, o devuelve None si no es válida."""
     if not valor:
         return None
     try:
@@ -210,13 +159,7 @@ def parse_fecha_iso(valor: Any) -> Optional[date]:
 
 
 def parse_fecha_texto(texto: Any) -> Optional[date]:
-    """
-    Interpreta el plazo en texto libre de la BDNS (`textInicio` / `textFin`):
-      'HASTA 30 DE SEPTIEMBRE DE 2026' → 2026-09-30
-      'DESDE 1 DE OCTUBRE DE 2025'     → 2025-10-01
-      '15/11/2026' o '15-11-2026'      → 2026-11-15
-    Textos sin fecha concreta ('15 DÍAS HÁBILES DESDE LA PUBLICACIÓN') → None.
-    """
+    """Extrae una fecha de solicitud desde texto libre en formato numérico o con mes en español, o devuelve None."""
     if not texto:
         return None
     m = re.search(r"\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})\b", str(texto))
@@ -243,13 +186,7 @@ _RE_UMBRAL = re.compile(
 
 
 def extraer_umbral_poblacion(*textos: Any) -> Optional[int]:
-    """
-    Busca un umbral de población en los textos, por orden (el primero que lo tenga gana):
-      'CAMINOS RURALES MUNICIP DE MENOS DE 20.000 HB'          → 20000
-      'municipios ... hasta 20000 habitantes'                  → 20000
-      'población inferior a 5.000 habitantes'                  → 5000
-    Devuelve None si ningún texto menciona un umbral.
-    """
+    """Busca el primer umbral máximo de habitantes mencionado en los textos recibidos, o devuelve None."""
     for texto in textos:
         m = _RE_UMBRAL.search(normalizar_texto(texto))
         if m:
@@ -260,6 +197,7 @@ def extraer_umbral_poblacion(*textos: Any) -> Optional[int]:
 
 
 def _truncar(valor: Any, longitud: int) -> Optional[str]:
+    """Recorta un texto a la longitud máxima indicada y devuelve None si está vacío o es nulo."""
     if valor is None:
         return None
     texto = str(valor).strip()
@@ -267,6 +205,7 @@ def _truncar(valor: Any, longitud: int) -> Optional[str]:
 
 
 def palabras_clave() -> list[str]:
+    """Devuelve las palabras clave normalizadas para el prefiltro, o una lista vacía si está desactivado."""
     raw = (BDNS_PALABRAS_CLAVE_RAW or "").strip()
     if raw in ("", "*"):
         return []
@@ -277,12 +216,8 @@ def es_relevante_resumen(
     resumen: dict, nombres_municipios_norm: set[str], claves: Optional[list[str]] = None
 ) -> bool:
     """
-    Prefiltro sobre el resultado de la búsqueda (antes de pedir el detalle):
-      - LOCAL      → solo si el órgano es uno de nuestros municipios (no se exigen palabras clave).
-      - AUTONOMICA → solo la Comunidad de Madrid, y con alguna palabra clave del dominio.
-      - ESTADO     → con alguna palabra clave del dominio.
-      - Dirigida a un ayuntamiento concreto que no es de los nuestros → descartada.
-      - Resto (OTROS, otras autonomías) → descartado.
+    Filtra un resumen de búsqueda antes de pedir su detalle según el ámbito del órgano,
+    los municipios del sistema y las palabras clave configuradas.
     """
     claves = palabras_clave() if claves is None else claves
     nivel1 = normalizar_texto(resumen.get("nivel1"))
@@ -356,17 +291,17 @@ def normalizar_detalle(detalle: dict, hoy: Optional[date] = None) -> Optional[di
 
 
 # =============================================================================
-# Reglas de asignación convocatoria → municipio (función pura)
+# Reglas de asignación entre convocatorias y municipios
 # =============================================================================
 
 def regla_para_municipio(convocatoria: dict, nombre_municipio_norm: str, poblacion: Optional[int]) -> Optional[str]:
     """
-    Decide si una convocatoria aplica a un municipio y por qué regla (prioridad R1 > R2 > R3).
-    Devuelve 'organo_local' | 'umbral_poblacion' | 'region_completa' o None si no aplica.
+    Evalúa si una convocatoria aplica a un municipio según la prioridad R1 > R2 > R3.
+    Devuelve el nombre de la regla aplicada o None si no corresponde.
     """
     nivel1 = normalizar_texto(convocatoria.get("organo_nivel1"))
 
-    # R1: convocatorias de entidades locales → solo al propio municipio (nunca a los demás)
+    # R1: convocatorias de entidades locales, aplicables solo al propio municipio.
     if nivel1 == "LOCAL":
         candidatos = _municipio_de_organo_local(convocatoria.get("organo_nivel2"), convocatoria.get("organo_nivel3"))
         return REGLA_ORGANO_LOCAL if nombre_municipio_norm in candidatos else None
@@ -377,25 +312,25 @@ def regla_para_municipio(convocatoria: dict, nombre_municipio_norm: str, poblaci
     if not es_regional:
         return None
 
-    # R1 (variante): ayuda estatal/autonómica dirigida a un ayuntamiento concreto
-    # ("Subvención al Ayuntamiento de Colmenar Viejo para ...") → solo a ese municipio, nunca a toda la región
+    # R1 (variante): ayuda estatal o autonómica dirigida a un ayuntamiento concreto
+    # ("Subvención al Ayuntamiento de Colmenar Viejo para ..."), aplicable solo a ese municipio.
     destinatarios = municipios_destinatarios(convocatoria.get("descripcion"))
     if destinatarios:
         return REGLA_ORGANO_LOCAL if _nombre_coincide(nombre_municipio_norm, destinatarios) else None
 
-    # R2: umbral de población → necesita el padrón; sin dato no se puede afirmar que aplique
+    # R2: umbral de población; requiere el dato de padrón para poder comprobarse.
     umbral = convocatoria.get("poblacion_max_objetivo")
     if umbral:
         return REGLA_UMBRAL_POBLACION if poblacion is not None and poblacion < int(umbral) else None
 
-    # R3: ámbito autonómico/estatal sin restricciones
+    # R3: ámbito autonómico o estatal sin restricciones
     return REGLA_REGION_COMPLETA
 
 
 def asignar_convocatorias(
     nombre_municipio: str, poblacion: Optional[int], convocatorias: Iterable[dict]
 ) -> list[tuple[str, str]]:
-    """Lista de (codigo_bdns, regla_asignacion) que aplican al municipio."""
+    """Devuelve la lista de pares (codigo_bdns, regla_asignacion) aplicables al municipio."""
     nombre_norm = normalizar_nombre_municipio(nombre_municipio)
     asignaciones = []
     for conv in convocatorias:
@@ -410,6 +345,7 @@ def asignar_convocatorias(
 # =============================================================================
 
 def _nueva_sesion() -> requests.Session:
+    """Crea una sesión HTTP de requests configurada para consultar la API de la BDNS."""
     sesion = requests.Session()
     sesion.headers.update({"Accept": "application/json", "User-Agent": "ReHabitar-PoC/1.0 (proyecto academico)"})
     return sesion
@@ -463,19 +399,23 @@ def buscar_convocatorias(sesion: requests.Session, fecha_desde: date) -> list[di
 
 
 def obtener_detalle(sesion: requests.Session, numero: str) -> dict:
+    """Descarga el JSON completo de detalle de una convocatoria desde la API de la BDNS."""
     return _get_json(sesion, BDNS_API_URL, {"numConv": numero, "vpd": "GE"})
 
 
 def cargar_cache() -> Optional[dict]:
+    """Devuelve una copia de la última descarga almacenada en memoria RAM, o None si no existe."""
     return copy.deepcopy(_BDNS_MEM_CACHE) if _BDNS_MEM_CACHE is not None else None
 
 
 def guardar_cache(payload: dict) -> None:
+    """Guarda en memoria RAM una copia de la descarga para reutilizarla como caché y respaldo."""
     global _BDNS_MEM_CACHE
     _BDNS_MEM_CACHE = copy.deepcopy(payload)
 
 
 def _cache_vigente(payload: Optional[dict]) -> bool:
+    """Comprueba si la caché contiene detalles y su antigüedad es menor que BDNS_CACHE_HORAS."""
     if not payload or not payload.get("detalles"):
         return False
     try:
@@ -492,13 +432,8 @@ def fetch_bdns_convocatorias_api(
     hoy: Optional[date] = None,
 ) -> list[dict]:
     """
-    Descarga de la API BDNS las convocatorias con alcance en la Comunidad de Madrid y las devuelve
-    normalizadas (campos de la Sección 7.1.5 + `finalidad`).
-
-    - `nombres_municipios`: municipios del sistema; se usan para no descartar las convocatorias
-      LOCALES de sus ayuntamientos.
-    - Si hay una descarga en memoria de menos de BDNS_CACHE_HORAS y no se fuerza, se reutiliza.
-    - Si la API falla, se usa la última copia guardada (aunque sea antigua); si no hay, devuelve [].
+    Descarga de la API BDNS las convocatorias aplicables a la Comunidad de Madrid y las devuelve normalizadas.
+    Reutiliza la caché en memoria si está vigente o como respaldo si la API falla.
     """
     hoy = hoy or date.today()
     cache = cargar_cache()
@@ -562,6 +497,7 @@ def fetch_bdns_convocatorias_api(
 
 
 def _normalizar_lista(detalles: Iterable[dict], hoy: date) -> list[dict]:
+    """Normaliza una colección de detalles crudos de la BDNS deduplicando por código."""
     resultado: dict[str, dict] = {}
     for detalle in detalles:
         fila = normalizar_detalle(detalle, hoy=hoy)
@@ -610,12 +546,13 @@ def upsert_convocatorias(conn, convocatorias: list[dict]) -> int:
 
 
 def _tabla_existe(cur, tabla: str) -> bool:
+    """Comprueba si una tabla existe en el esquema public de PostgreSQL."""
     cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"public.{tabla}",))
     return bool(cur.fetchone()[0])
 
 
 def _cargar_municipios(conn) -> dict[str, str]:
-    """{codigo_ine: nombre} de la tabla `municipios` (de P1). Vacío si la tabla aún no existe."""
+    """Devuelve un diccionario {codigo_ine: nombre} desde municipios, o vacío si la tabla no existe."""
     with conn.cursor() as cur:
         if not _tabla_existe(cur, "municipios"):
             log("AVISO: la tabla `municipios` (P1) no existe todavía.")
@@ -625,7 +562,7 @@ def _cargar_municipios(conn) -> dict[str, str]:
 
 
 def _poblacion_actual(cur, codigo_ine: str) -> Optional[int]:
-    """Población del último año disponible en `demografia_anual` (de P2). None si no hay dato."""
+    """Devuelve la población más reciente del municipio en demografia_anual, o None si no hay dato."""
     if not _tabla_existe(cur, "demografia_anual"):
         return None
     cur.execute(
@@ -637,6 +574,7 @@ def _poblacion_actual(cur, codigo_ine: str) -> Optional[int]:
 
 
 def _cargar_convocatorias_bd(cur) -> list[dict]:
+    """Lee desde PostgreSQL los campos de convocatorias necesarios para evaluar las reglas de asignación."""
     cur.execute(
         "SELECT codigo_bdns, descripcion, organo_nivel1, organo_nivel2, organo_nivel3, poblacion_max_objetivo "
         "FROM convocatorias"
@@ -647,12 +585,8 @@ def _cargar_convocatorias_bd(cur) -> list[dict]:
 
 def ingest_bdns_for_municipio(codigo_ine: str, conn=None) -> int:
     """
-    Fase 2 (bajo demanda): asigna al municipio `codigo_ine` las convocatorias de la tabla `convocatorias`.
-      1. Lee el nombre del municipio y su última población (`demografia_anual`).
-      2. Aplica las reglas R1/R2/R3 (`asignar_convocatorias`).
-      3. Sustituye sus filas en `convocatoria_municipio` (upsert + borra las que ya no aplican).
-      4. Marca `municipios.hidratado = TRUE` y `fecha_hidratacion = CURRENT_TIMESTAMP`.
-    Devuelve el número de convocatorias asignadas. Si se pasa `conn`, el commit lo hace quien llama.
+    Asigna al municipio las convocatorias guardadas en PostgreSQL y lo marca como hidratado.
+    Devuelve el total de convocatorias asignadas; si se recibe una conexión, el commit lo hace el llamador.
     """
     propia = conn is None
     if propia:
@@ -698,9 +632,8 @@ def ingest_bdns_for_municipio(codigo_ine: str, conn=None) -> int:
 
 def run_etl_p4(target_codes: list[str] | None = None, force_refresh: bool = False) -> str:
     """
-    Fase 1 (carga inicial):
-      1. Descarga las convocatorias de la API BDNS y las guarda en `convocatorias`.
-      2. Las asigna a los municipios `target_codes` (por defecto, a todos los de la tabla `municipios`).
+    Descarga las convocatorias de la API BDNS, las guarda en PostgreSQL y las asigna
+    a los municipios indicados en target_codes o a todos los existentes en la base de datos.
     """
     conn = get_db_connection()
     try:
@@ -729,7 +662,8 @@ def run_etl_p4(target_codes: list[str] | None = None, force_refresh: bool = Fals
 
 
 def _main() -> None:
-    parser = argparse.ArgumentParser(description="ETL P4: convocatorias BDNS → PostgreSQL")
+    """Punto de entrada por línea de comandos para ejecutar el ETL P4 o una prueba con --dry-run."""
+    parser = argparse.ArgumentParser(description="ETL P4: convocatorias BDNS a PostgreSQL")
     parser.add_argument("codigos", nargs="*", help="Códigos INE a asignar (por defecto, todos los de la BD)")
     parser.add_argument("--force-refresh", action="store_true", help="Ignora la caché reciente en memoria")
     parser.add_argument("--dry-run", action="store_true", help="Solo descarga y muestra; no toca la BD")

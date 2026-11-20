@@ -23,36 +23,50 @@ except ImportError:  # pragma: no cover - permite pruebas unitarias del Mediador
     _HAS_FASTAPI = False
 
     class HTTPException(Exception):  # type: ignore
+        """Excepción HTTP sustitutiva cuando FastAPI no está instalado."""
+
         def __init__(self, status_code: int, detail: Any = None):
+            """Guarda el código de estado y el detalle del error HTTP."""
             super().__init__(detail)
             self.status_code = status_code
             self.detail = detail
 
     def Depends(dependency: Any = None) -> Any:  # type: ignore
+        """Devuelve la dependencia sin envolverla cuando falta FastAPI."""
         return dependency
 
     def Query(default: Any = None, **kwargs: Any) -> Any:  # type: ignore
+        """Devuelve el valor por defecto del parámetro de consulta."""
         return default
 
     class FastAPI:  # type: ignore
+        """Aplicación mínima para registrar rutas en pruebas sin FastAPI."""
+
         def __init__(self, **kwargs: Any):
+            """Inicializa la lista de rutas registradas."""
             self.routes: List[Dict[str, Any]] = []
 
         def add_middleware(self, *args: Any, **kwargs: Any) -> None:
+            """Ignora el registro de middlewares en modo de compatibilidad."""
             return None
 
         def mount(self, *args: Any, **kwargs: Any) -> None:
+            """Ignora el montaje de ficheros estáticos en modo de compatibilidad."""
             return None
 
         def get(self, path: str, **kwargs: Any):
+            """Registra un endpoint GET en la lista interna de rutas."""
             def decorator(fn):
+                """Añade la función decorada como ruta GET y la devuelve."""
                 self.routes.append({"method": "GET", "path": path, "fn": fn})
                 return fn
 
             return decorator
 
         def post(self, path: str, **kwargs: Any):
+            """Registra un endpoint POST en la lista interna de rutas."""
             def decorator(fn):
+                """Añade la función decorada como ruta POST y la devuelve."""
                 self.routes.append({"method": "POST", "path": path, "fn": fn})
                 return fn
 
@@ -125,6 +139,7 @@ if _HAS_FASTAPI:
 
 
 def _is_numeric_weight(val: Any) -> bool:
+    """Comprueba si un peso recibido en la petición es un número válido."""
     return isinstance(val, (int, float)) and not isinstance(val, bool)
 
 
@@ -184,12 +199,8 @@ async def ensure_municipio_hydrated(
     db: AsyncSession, codigo_ine: str, force_refresh: bool = False
 ) -> str:
     """
-    Orquestador de Ingesta Bajo Demanda en el Backend (Sección 5 y 9):
-    1. Verifica que `codigo_ine` exista en `municipios`.
-    2. Si `hidratado == True`, tiene métricas en BD y `not force_refresh`:
-       retorna `origen_datos = "CACHE_POSTGRESQL"`.
-    3. En caso contrario, ejecuta los módulos materializados P1 -> P2 -> P3 -> P4
-       y retorna `origen_datos = "INGESTA_EN_VIVO_GUARDADA_EN_BD"`.
+    Asegura que el municipio exista y esté hidratado en PostgreSQL antes de evaluarlo.
+    Reutiliza la caché en BD si ya tiene datos o ejecuta los módulos P1-P4 bajo demanda.
     """
     municipio = await get_municipio_by_ine(db, codigo_ine)
     if municipio is None:
@@ -390,12 +401,8 @@ async def get_municipio_detail(
     db: AsyncSession = Depends(get_db),
 ) -> MunicipioDetailSchema:
     """
-    Mediador principal (Sección 7.3 y Diagrama Sección 9):
-    1. Asegura la hidratación materializada (P1, P2, P3, P4).
-    2. Lee padrón, infraestructuras y ayudas abiertas desde PostgreSQL.
-    3. Identifica el centro de urgencias más cercano (KNN PostGIS) y consulta CartoCiudad en tiempo real
-       (Consulta 2, sin almacenar tiempos en BD).
-    4. Ejecuta el motor WLC en memoria y devuelve `MunicipioDetailSchema`.
+    Devuelve la ficha completa de un municipio asegurando su hidratación previa en BD.
+    Calcula en tiempo real la ruta sanitaria con CartoCiudad y evalúa el índice WLC en memoria.
     """
     origen = await ensure_municipio_hydrated(db, codigo_ine, force_refresh=force_refresh)
 
@@ -642,4 +649,5 @@ if _HAS_FASTAPI and os.path.isdir(FRONTEND_DIR):
 
     @app.get("/", include_in_schema=False)
     async def serve_frontend():
+        """Sirve la página principal de la interfaz web."""
         return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))

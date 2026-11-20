@@ -1,6 +1,4 @@
-"""
-Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la Propuesta.
-"""
+"""Esquemas Pydantic de respuesta y serialización de la API de Re-Habitar PoC."""
 
 from datetime import date
 from typing import Any, Dict, List, Optional
@@ -9,10 +7,7 @@ from ._compat import BaseModel, ConfigDict, Field
 
 
 class WLCBreakdownSchema(BaseModel):
-    """
-    Responsable P5 - Sección 4, 6.4 y 7.3:
-    Desglose pormenorizado de los 5 parámetros de habitabilidad (0 a 100).
-    """
+    """Desglose de la puntuación WLC (0 a 100), semáforo de viabilidad y pesos aplicados."""
     indice_wlc: float = Field(..., description="Puntuación de Viabilidad Global 0-100 (ej. 96.05 en Madarcos)")
     semaforo: str = Field(..., description="VERDE, AMBAR, ROJO o PENDIENTE")
     etiqueta_viabilidad: str = Field(..., description="Etiqueta descriptiva de viabilidad")
@@ -28,9 +23,7 @@ from .p1_geo import InfraestructuraSchema
 
 
 class CentroSanitarioSchema(BaseModel):
-    """
-    Schema Pydantic para el directorio de Centros Sanitarios de la CAM (Sección 7.1.4 - P3).
-    """
+    """Esquema de un centro sanitario de la Comunidad de Madrid y su distancia opcional al municipio."""
     id_centro: str = Field(..., description="Identificador único del centro (ej. 'CS-28027')")
     nombre: str = Field(..., description="Nombre oficial del centro sanitario")
     tipo: str = Field(..., description="Tipología: Centro de Salud, Consultorio Local, etc.")
@@ -49,11 +42,7 @@ class CentroSanitarioSchema(BaseModel):
 
 
 class RutaSanitariaSchema(BaseModel):
-    """
-    Responsables P3 y P5 - Consulta 2 y Sección 7.3:
-    Resultado de la consulta espacial KNN en PostGIS (P3) enriquecida bajo demanda
-    con la integración virtual en tiempo real de CartoCiudad (P5).
-    """
+    """Centro sanitario más cercano obtenido por KNN en PostGIS junto con la ruta y tiempo estimados en tiempo real."""
     id_centro: str = Field(..., description="Identificador del centro sanitario (ej. 'CS-28027')")
     nombre: str = Field(..., description="Nombre del centro (ej. 'Consultorio Local Buitrago del Lozoya')")
     tipo: str = Field(..., description="Tipología del centro (ej. 'Centro de Salud / Urgencias')")
@@ -82,12 +71,8 @@ class RutaSanitariaSchema(BaseModel):
 
 class ConvocatoriaMunicipioItemSchema(BaseModel):
     """
-    Responsable P4 - Consulta 4 y Sección 7.1.5 / 7.1.6.
-    Una convocatoria de la BDNS y, si se consulta para un municipio, la regla por la que se le asignó.
-
-    Respecto a la descripción original se añaden `finalidad` (categoría, filtro `categoria`) y
-    `poblacion_max_objetivo` (umbral de habitantes extraído del texto; None = sin umbral).
-    `regla_asignacion` es None cuando se listan convocatorias sin filtrar por municipio.
+    Convocatoria de la BDNS con su órgano convocante, plazo, presupuesto, finalidad y umbral poblacional opcional.
+    Incluye `regla_asignacion` cuando la consulta se filtra para un municipio concreto.
     """
     model_config = ConfigDict(from_attributes=True)
 
@@ -112,9 +97,7 @@ class ConvocatoriaMunicipioItemSchema(BaseModel):
 
 
 class MunicipioListItemSchema(BaseModel):
-    """
-    Elemento de `GET /api/municipios` (Consulta 1 y Mapa V1).
-    """
+    """Resumen territorial de un municipio para el listado y mapa principal (`GET /api/municipios`)."""
     codigo_ine: str
     nombre: str
     provincia: str = Field(default="Madrid")
@@ -130,9 +113,7 @@ class MunicipioListItemSchema(BaseModel):
 
 
 class MunicipioDetailSchema(BaseModel):
-    """
-    Ficha completa de `GET /api/municipios/{codigo_ine}` (Consultas 1, 2, 3, 4 y Fusión en Memoria).
-    """
+    """Ficha completa de un municipio con demografía, infraestructura, índice WLC, urgencias y convocatorias."""
     codigo_ine: str
     nombre: str
     provincia: str = Field(default="Madrid")
@@ -154,18 +135,9 @@ class MunicipioDetailSchema(BaseModel):
 
 class DemografiaPuntoAnualSchema(BaseModel):
     """
-    TODO (Responsable P2 - Sección 7.1.2):
-    - anio: int
-    - poblacion: int
-    - poblacion_mayor_65: Optional[int]
-    - poblacion_menor_15: Optional[int]
-    - tasa_envejecimiento: Optional[float]
-
-    Dato de un año (un punto de la gráfica de líneas de Chart.js).
-    Las tres columnas de edad son Optional con None por defecto, que corresponde al NULL de la BD
-    (de momento no hay fuente de datos por edad); así el frontend puede distinguir «sin dato» de «0».
+    Dato demográfico de un municipio en un año concreto para la serie histórica.
+    Las columnas por grupo de edad admiten `None` cuando no hay desglose disponible en la fuente.
     """
-    # from_attributes=True: además de con un dict, se puede construir directamente desde un objeto ORM (DemografiaAnual)
     model_config = ConfigDict(from_attributes=True)
 
     anio: int
@@ -177,26 +149,8 @@ class DemografiaPuntoAnualSchema(BaseModel):
 
 class DemografiaSerieResponseSchema(BaseModel):
     """
-    TODO (Responsable P2 - Consulta 3 y Visualización 2 en Chart.js):
-    - codigo_ine: str
-    - nombre: str
-    - poblacion_inicial_10a: int
-    - poblacion_actual: int
-    - variacion_10a_pct: float
-    - cobertura_fibra_pct: float
-    - distancia_urgencias_km: float
-    - num_ayudas_abiertas: int
-    - serie_anual: List[DemografiaPuntoAnualSchema]
-
-    Cambios respecto a la descripción original de arriba (todos para que, si falta un dato,
-    no se rompa nada ni se invente nada):
-    - poblacion_inicial_10a / variacion_10a_pct pasan a ser Optional:
-      si al INE le falta el año de hace 10 años, o la población de entonces es 0, no se puede
-      calcular y se devuelve None.
-    - cobertura_fibra_pct (P1), distancia_urgencias_km (P3) y num_ayudas_abiertas (P4)
-      pasan a ser Optional con None por defecto: salen de tablas de otros compañeros, el service
-      de P2 no las consulta; las pasa quien llama (main.py) después de pedírselas a los services
-      de P1/P3/P4. Si no se pasan, quedan en None.
+    Serie demográfica histórica de un municipio junto con sus variaciones e indicadores de contexto.
+    La población inicial a 10 años y los indicadores de infraestructura, sanidad o ayudas admiten `None` si no están disponibles.
     """
     codigo_ine: str
     nombre: str

@@ -1,16 +1,6 @@
 """
-Servicio P5.2 - Motor WLC (Weighted Linear Combination) en Memoria (Escala 0 - 100)
-Responsable: Desarrollador P5
-
-Alineado con la Sección 4 ("Metodología: Índice de Viabilidad WLC"), Sección 7.3
-("Fusión en Memoria") y el Diagrama de la Sección 9 de la Propuesta:
-Normaliza los 5 indicadores de habitabilidad a una escala común de 0 a 100 puntos:
-  1. Acceso por carretera asfaltada (`distancia_carretera_km`) -> Peso PoC: 40% | Peso Global: 25%
-  2. Proximidad a servicios sanitarios y de urgencia (`tiempo_urgencias_min` de CartoCiudad:
-     <= 15 min = 100 pts; decae linealmente hasta 0 pts a los >= 45 min) -> Peso PoC: 30% | Peso Global: 20%
-  3. Conectividad digital (`cobertura_fibra_pct` y `cobertura_movil_pct`) -> Peso Global: 20%
-  4. Acceso a recursos hídricos (`distancia_recurso_hidrico_km`) -> Peso Global: 15%
-  5. Inercia demográfica a 10 años (`variacion_10a_pct` y masa crítica) -> Peso PoC: 30% | Peso Global: 20%
+Servicio P5.2: motor WLC (Weighted Linear Combination) en memoria sobre una escala de 0 a 100.
+Normaliza cinco indicadores de habitabilidad (carretera, sanidad, conectividad, agua y demografía) y calcula el índice y semáforo de viabilidad.
 """
 
 from typing import Any, Dict, List, Optional
@@ -39,9 +29,8 @@ def clamp(val: float, low: float = 0.0, high: float = 100.0) -> float:
 
 def compute_acceso_carretera_score(distancia_carretera_km: float) -> float:
     """
-    Indicador 1 (Sección 4) - Basado en el Rural Access Index del Banco Mundial.
-    - 0.0 km (conexión inmediata a carretera asfaltada, ej. Madarcos) -> 100.0 puntos.
-    - Decae linealmente hasta 0.0 puntos a los 15.0 km de camino sin asfaltar.
+    Puntúa el acceso por carretera asfaltada en escala 0-100 según el Rural Access Index.
+    Asigna 100 puntos a 0 km y decae linealmente hasta 0 puntos a los 15 km o más.
     """
     dist = max(0.0, float(distancia_carretera_km))
     return round(clamp(100.0 - (dist / 15.0) * 100.0), 2)
@@ -49,9 +38,8 @@ def compute_acceso_carretera_score(distancia_carretera_km: float) -> float:
 
 def compute_proximidad_sanitaria_score(tiempo_conduccion_min: float) -> float:
     """
-    Indicador 2 (Sección 4) - Siguiendo directrices europeas de tiempos de respuesta:
-    - Desplazamientos <= 15.0 minutos en coche (ej. Madarcos = 12.2 min) -> 100.0 puntos.
-    - Decae linealmente desde los 15 minutos hasta los 45 minutos (0.0 puntos a los >= 45 min).
+    Puntúa la proximidad en coche al centro de urgencias más cercano en escala 0-100.
+    Devuelve 100 puntos hasta 15 minutos y decae linealmente hasta 0 puntos a partir de 45 minutos.
     """
     tiempo = max(0.0, float(tiempo_conduccion_min))
     if tiempo <= 15.0:
@@ -65,9 +53,8 @@ def compute_conectividad_digital_score(
     cobertura_fibra_pct: float, cobertura_movil_pct: float
 ) -> float:
     """
-    Indicador 3 (Sección 4) - Basado en el marco europeo PoliRURAL.
-    Combina el porcentaje de cobertura de fibra óptica FTTH (60%) y cobertura móvil
-    de alta velocidad 4G/5G (40%) en una escala de 0 a 100.
+    Puntúa la conectividad digital del municipio en escala 0-100 según el marco PoliRURAL.
+    Combina la cobertura de fibra óptica (60 %) y la cobertura móvil de banda ancha (40 %).
     """
     fibra = clamp(float(cobertura_fibra_pct))
     movil = clamp(float(cobertura_movil_pct))
@@ -76,8 +63,8 @@ def compute_conectividad_digital_score(
 
 def compute_acceso_hidrico_score(distancia_recurso_hidrico_km: float) -> float:
     """
-    Indicador 4 (Sección 4) - Mide la cercanía a cursos de agua continuos o fuentes
-    de abastecimiento (`distancia_recurso_hidrico_km`, ej. 0.35 km en Madarcos -> 96.50 pts).
+    Puntúa la cercanía a cursos de agua o fuentes de abastecimiento en escala 0-100.
+    Parte de 100 puntos a 0 km y resta 10 puntos por cada kilómetro hasta un mínimo de 0.
     """
     dist = max(0.0, float(distancia_recurso_hidrico_km))
     return round(clamp(100.0 - 10.0 * dist), 2)
@@ -87,9 +74,8 @@ def compute_inercia_demografica_score(
     poblacion_actual: int, variacion_10a_pct: float
 ) -> float:
     """
-    Indicador 5 (Sección 4) - A partir de las series del INE a 10 años,
-    identifica municipios con pérdidas moderadas o recuperación donde la masa social
-    aún es rescatable, penalizando situaciones de despoblación crítica (< 30 hab).
+    Puntúa la inercia demográfica en escala 0-100 a partir de la variación poblacional a 10 años.
+    Resta 25 puntos a municipios con menos de 30 habitantes y devuelve 0 si no hay población.
     """
     pob = int(poblacion_actual)
     if pob <= 0:
@@ -198,11 +184,8 @@ def evaluate_wlc_for_municipio(
     custom_weights: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
-    Fusión en Memoria (Sección 4, 7.3 y Diagrama Sección 9):
-    1. Calcula los 5 subíndices (0-100).
-    2. Aplica las ponderaciones (`GLOBAL_5`, `POC_3` o `custom_weights`).
-    3. Clasifica el semáforo (`VERDE` >= 75, `AMBAR` 50 a 74.99, `ROJO` < 50).
-    4. Retorna el diccionario compatible con `WLCBreakdownSchema`.
+    Calcula los cinco subíndices de habitabilidad en memoria y los combina según los pesos indicados.
+    Clasifica el resultado en semáforo (VERDE, AMBAR o ROJO) y devuelve el desglose compatible con WLCBreakdownSchema.
     """
     s_carretera = compute_acceso_carretera_score(distancia_carretera_km)
     s_sanidad = compute_proximidad_sanitaria_score(tiempo_urgencias_min)
@@ -275,11 +258,8 @@ def filter_viable_municipios_c1(
     min_fibra_pct: float = 50.0,
 ) -> List[Any]:
     """
-    Resuelve en memoria la Consulta 1 (Sección 6.5):
-    Filtra los municipios con Índice WLC superior/igual al umbral (`min_wlc`, por defecto 75)
-    y con cobertura de fibra óptica suficiente cuando `requiere_fibra=True`.
-    Soporta tanto diccionarios como instancias de schemas (`MunicipioListItemSchema`, `WLCBreakdownSchema`).
-    Ordena los resultados de mayor a menor puntuación WLC.
+    Filtra en memoria los municipios que superan el umbral mínimo de WLC y la cobertura de fibra exigida.
+    Admite diccionarios o schemas de municipio y devuelve los resultados ordenados de mayor a menor índice WLC.
     """
     viables: List[Any] = []
     for item in municipios:

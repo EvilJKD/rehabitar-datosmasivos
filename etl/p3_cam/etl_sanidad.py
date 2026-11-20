@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """
-Módulo ETL P3 - API de Datos Abiertos de la Comunidad de Madrid (Centros Sanitarios)
-Responsable: Desarrollador P3
+Módulo ETL P3 para la descarga y carga de centros sanitarios de la Comunidad de Madrid.
 
-Objetivo:
-Conectarse directamente al Portal de Datos Abiertos de la Comunidad de Madrid
-(API REST CKAN y descarga directa JSON/CSV del catálogo de Centros, Servicios
-y Establecimientos Sanitarios), transformar las coordenadas UTM ETRS89 (EPSG:25830)
-a WGS84 (EPSG:4326), clasificar la disponibilidad de atención continuada/urgencias
-e insertar los registros geocodificados en `centros_sanitarios` con geometría PostGIS.
+Consulta el catálogo del Portal de Datos Abiertos de la CAM (API CKAN y recursos JSON/CSV),
+convierte coordenadas UTM ETRS89 (EPSG:25830) a WGS84 (EPSG:4326), clasifica los centros
+con urgencias y carga los registros en la tabla `centros_sanitarios` de PostGIS.
 
 Ejecución aislada:
     python etl/p3_cam/etl_sanidad.py
@@ -117,10 +113,9 @@ def get_db_connection():
 
 def utm30n_etrs89_to_wgs84(x: float, y: float) -> Optional[Tuple[float, float]]:
     """
-    Convierte coordenadas proyectadas UTM Huso 30N ETRS89 (EPSG:25830), empleadas por
-    el Portal de Datos Abiertos de la Comunidad de Madrid, a coordenadas geográficas
-    WGS84 (EPSG:4326) `(latitud, longitud)` mediante las ecuaciones inversas de
-    Transverse Mercator (elipsoide GRS80/WGS84).
+    Convierte coordenadas UTM Huso 30N ETRS89 (EPSG:25830) a coordenadas geográficas
+    WGS84 (EPSG:4326) en formato `(latitud, longitud)`. Si ya llegan en grados WGS84
+    válidos, las devuelve directamente.
     """
     # Si ya vienen en grados geográficos WGS84 (Madrid: lat ~40.4, lon ~-3.7), devolver directamente
     if 35.0 <= x <= 45.0 and -10.0 <= y <= 5.0:
@@ -195,8 +190,8 @@ def detect_tiene_urgencias(
     horario: str = "",
 ) -> bool:
     """
-    Determina si un centro sanitario dispone de servicio de urgencias médicas /
-    atención continuada 24h (Hospitales, oferta/horario de Urgencias o cabeceras SAR/PAC/SUAP).
+    Determina si un centro sanitario dispone de servicio de urgencias o atención
+    continuada 24h según su tipo, nombre, horario o municipio cabecera SAR.
     """
     if raw_urg is not None and str(raw_urg).strip() != "":
         val = str(raw_urg).strip().lower()
@@ -220,20 +215,20 @@ def detect_tiene_urgencias(
     if (
         "CENTRO DE SALUD" in combined_norm or "CONSULTORIO" in combined_norm
     ) and mun_norm in SAR_24H_MUNICIPALITIES:
-        # En el caso real de la Sección 7.2 (CS-28027 Buitrago del Lozoya y cabeceras SAR),
-        # actúa como centro de urgencias de referencia de la comarca
+        # Los centros de salud y consultorios en cabeceras SAR actúan como referencia de urgencias comarcal
         return True
 
     return False
 
 
 def is_primary_or_emergency_center(tipo: str, nombre: str) -> bool:
-    """Filtra centros sanitarios asistenciales (atención primaria, hospitalaria y urgencias)."""
+    """Indica si un centro pertenece a atención primaria, hospitalaria o de urgencias."""
     combined = f"{tipo} {nombre}".upper()
     return any(keyword in combined for keyword in RELEVANT_CENTER_TYPES)
 
 
 def _parse_float(value: Any) -> Optional[float]:
+    """Convierte un valor a float aceptando coma decimal, o devuelve None si no es válido."""
     if value is None:
         return None
     s = str(value).strip().replace(",", ".")
@@ -247,8 +242,8 @@ def _parse_float(value: Any) -> Optional[float]:
 
 def normalize_cam_record(raw: Dict[str, Any], only_relevant: bool = True) -> Optional[Dict[str, Any]]:
     """
-    Normaliza un registro crudo procedente del JSON/CSV de Datos Abiertos de la CAM
-    al esquema de la tabla `centros_sanitarios`.
+    Normaliza un registro crudo del JSON o CSV de la CAM al esquema de `centros_sanitarios`.
+    Devuelve None si faltan datos obligatorios, no es asistencial o sus coordenadas quedan fuera de rango.
     """
     id_centro = str(
         raw.get("id_centro")
@@ -368,7 +363,7 @@ def normalize_cam_record(raw: Dict[str, Any], only_relevant: bool = True) -> Opt
         or ("24 Horas / Atención Continuada" if tiene_urg else "Horario de Atención Primaria")
     ).strip()[:120]
 
-    # Homologación con el caso de referencia de la Sección 7.2 (Buitrago del Lozoya -> CS-28027)
+    # Homologación del centro de referencia de Buitrago del Lozoya con código CS-28027.
     # Se exige igualdad exacta tras normalizar acentos para no colisionar con
     # 'Gargantilla del Lozoya y Pinilla de Buitrago'.
     if _normalize_text(municipio) == "BUITRAGO DEL LOZOYA" and (
@@ -396,8 +391,8 @@ def normalize_cam_record(raw: Dict[str, Any], only_relevant: bool = True) -> Opt
 
 def discover_cam_sanidad_resource_urls(timeout: float = 8.0) -> List[Tuple[str, str]]:
     """
-    Consulta el endpoint CKAN `package_show` del Portal de Datos Abiertos de la CAM
-    para descubrir dinámicamente las URLs vigentes de descarga JSON y CSV.
+    Consulta la API CKAN de Datos Abiertos de la CAM para obtener las URLs vigentes
+    en JSON y CSV del catálogo sanitario. Añade URLs de respaldo priorizando JSON sobre CSV.
     """
     discovered: List[Tuple[str, str]] = []
     try:
@@ -422,7 +417,7 @@ def discover_cam_sanidad_resource_urls(timeout: float = 8.0) -> List[Tuple[str, 
 
 
 def parse_cam_json_payload(payload: Any, only_relevant: bool = True) -> List[Dict[str, Any]]:
-    """Parsea la estructura JSON devuelta por el Portal de Datos Abiertos de la CAM."""
+    """Extrae y normaliza los centros sanitarios de una respuesta JSON evitando duplicados por id_centro."""
     raw_list: List[Dict[str, Any]] = []
     if isinstance(payload, dict):
         raw_list = payload.get("data") or payload.get("records") or payload.get("result") or []
@@ -446,7 +441,7 @@ def parse_cam_json_payload(payload: Any, only_relevant: bool = True) -> List[Dic
 
 
 def parse_cam_csv_content(raw_bytes: Union[bytes, str], only_relevant: bool = True) -> List[Dict[str, Any]]:
-    """Parsea el contenido CSV del Portal de Datos Abiertos de la CAM (soportando UTF-8, Latin-1 y str)."""
+    """Decodifica y parsea un CSV sanitario de la CAM (UTF-8 o Latin-1) consolidando duplicados por id_centro."""
     if isinstance(raw_bytes, str):
         text_content = raw_bytes
     else:
@@ -479,10 +474,9 @@ def fetch_cam_health_centers_api(
     force_refresh: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Realiza la petición HTTP GET directamente al Portal de Datos Abiertos de la
-    Comunidad de Madrid (vía descubrimiento CKAN y descarga JSON/CSV) y retorna
-    la lista de centros sanitarios normalizados y geocodificados en WGS84.
-    Utiliza una caché en memoria (TTL configurable) salvo que `force_refresh=True`.
+    Descarga y normaliza el catálogo de centros sanitarios desde la API de Datos Abiertos
+    de la CAM probando los recursos JSON y CSV. Usa caché en memoria con TTL configurable
+    salvo que `force_refresh=True`.
     """
     if (
         not force_refresh
@@ -531,10 +525,8 @@ def fetch_cam_health_centers_api(
 
 def upsert_health_centers_to_db(centers: List[Dict[str, Any]], conn=None) -> Tuple[int, int]:
     """
-    Inserta o actualiza (`ON CONFLICT (id_centro) DO UPDATE`) la lista de centros
-    sanitarios en la tabla `centros_sanitarios`, generando la geometría PostGIS
-    `ST_SetSRID(ST_MakePoint(longitud, latitud), 4326)`.
-    Devuelve `(total_insertados, total_con_urgencias)`.
+    Inserta o actualiza los centros sanitarios en `centros_sanitarios` creando su geometría
+    PostGIS en EPSG:4326. Devuelve `(total_insertados, total_con_urgencias)`.
     """
     own_conn = False
     if conn is None:
@@ -604,9 +596,8 @@ def ingest_centros_for_municipio(
     force_refresh: bool = False,
 ) -> int:
     """
-    Filtra e ingesta bajo demanda los centros sanitarios de un municipio específico
-    desde la API de la CAM. Solo incluye la red de urgencias si la tabla en BD
-    aún no contiene ningún centro con urgencias.
+    Filtra e inserta bajo demanda los centros sanitarios de un municipio desde la API de la CAM.
+    Incluye la red de urgencias solo si la tabla aún no contiene ningún centro con urgencias.
     """
     own_conn = False
     if conn is None:
@@ -646,10 +637,8 @@ def ingest_centros_for_municipio(
 
 def run_etl_p3(seed_municipios: Optional[List[str]] = None) -> str:
     """
-    Ejecuta la carga semilla inicial ligera del ETL P3 conectándose a la API de Datos
-    Abiertos de la CAM: inserta la red base de urgencias (`tiene_urgencias = True`) y los
-    consultorios de los municipios semilla; los consultorios locales del resto de municipios
-    se hidratan bajo demanda desde el backend.
+    Ejecuta la carga inicial del módulo P3 insertando la red de urgencias y los centros
+    de los municipios semilla en PostgreSQL. El resto de municipios se hidrata bajo demanda.
     """
     target_seeds = DEFAULT_SEED_MUNICIPIOS if seed_municipios is None else seed_municipios
     seed_set = {_normalize_text(m) for m in target_seeds if m}

@@ -62,6 +62,7 @@ UPSERT_INFRAESTRUCTURA = """
 
 
 def get_db_connection():
+    """Abre una conexión síncrona a PostgreSQL usando DATABASE_URL_SYNC o las variables POSTGRES_*."""
     if psycopg2 is None:
         raise RuntimeError("psycopg2 no está instalado en este entorno.")
     dsn = os.getenv("DATABASE_URL_SYNC")
@@ -78,7 +79,7 @@ def get_db_connection():
 
 
 def ingest_infraestructura_municipio(codigo_ine: str, conn=None) -> dict:
-    """Actualiza las métricas usando la transacción del llamante si proporciona una."""
+    """Valida el código INE de Madrid y actualiza las métricas de infraestructura del municipio. Reutiliza la conexión del llamante si se proporciona o abre una nueva."""
     if not re.fullmatch(r"28[0-9]{3}", codigo_ine):
         raise ValueError(f"Código INE de Madrid inválido: {codigo_ine!r}.")
     if conn is None:
@@ -88,6 +89,7 @@ def ingest_infraestructura_municipio(codigo_ine: str, conn=None) -> dict:
 
 
 def _ingest_infraestructura(codigo_ine: str, conn) -> dict:
+    """Obtiene la cobertura y las líneas de infraestructura de un municipio y guarda sus métricas en PostGIS. Devuelve el registro actualizado como diccionario."""
     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
         cursor.execute(
             "SELECT latitud, longitud FROM municipios WHERE codigo_ine = %s",
@@ -107,7 +109,7 @@ def _ingest_infraestructura(codigo_ine: str, conn) -> dict:
 
 
 def run_etl_p1(seed_codes: list[str] | None = None) -> str:
-    """Carga el catálogo y, si se indican, las métricas de los municipios semilla."""
+    """Carga en PostGIS los municipios de Madrid obtenidos del IGN. Si se indican códigos semilla, calcula también sus métricas de infraestructura."""
     municipios = fetch_municipios_ign_api()
     codes = dict.fromkeys(seed_codes or [])
     unknown = codes.keys() - {municipio["codigo_ine"] for municipio in municipios}

@@ -1,13 +1,6 @@
 """
-Servicio P4 - Consulta C4 e Ingesta Bajo Demanda de Subvenciones (BDNS)
-Responsable: Desarrollador P4
-
-Consulta 4 (Sección 6.5): "¿Qué convocatorias aplicables al municipio seleccionado están abiertas,
-y con qué órgano convocante, presupuesto y fecha de fin de plazo?"
-
-Las convocatorias ya están materializadas en PostgreSQL por el ETL P4 (`convocatorias` y
-`convocatoria_municipio`); este servicio solo las consulta. La asignación de un municipio nuevo
-(hidratación bajo demanda) reutiliza la misma función del ETL para que las reglas estén en un único sitio.
+Servicio P4 para consultar las convocatorias de la BDNS almacenadas en
+PostgreSQL (Consulta 4) y asignar ayudas bajo demanda a municipios.
 """
 
 import asyncio
@@ -36,6 +29,7 @@ _COLUMNAS = """
 
 
 def _fila_a_dict(fila) -> Dict:
+    """Convierte una fila de resultado SQL en diccionario asegurando presupuesto_total como float."""
     datos = dict(fila)
     datos["presupuesto_total"] = float(datos.get("presupuesto_total") or 0)
     return datos
@@ -43,22 +37,16 @@ def _fila_a_dict(fila) -> Dict:
 
 async def hydrate_grants_on_demand(db: AsyncSession, codigo_ine: str) -> int:
     """
-    Ingesta híbrida bajo demanda (P4): cuando el usuario selecciona en el Frontend un municipio
-    todavía no cruzado con la BDNS, aplica las reglas de asignación (organo_local, umbral_poblacion,
-    region_completa) sobre el catálogo `convocatorias`, guarda el resultado en `convocatoria_municipio`
-    y marca `municipios.hidratado = TRUE`.
-
-    El ETL usa psycopg2 (síncrono), así que se ejecuta en un hilo para no bloquear el bucle de FastAPI.
-    `db` no se usa aquí: el ETL abre y confirma su propia conexión. Devuelve el nº de ayudas asignadas.
+    Asigna bajo demanda las convocatorias del catálogo a un municipio y lo marca como hidratado.
+    Ejecuta la función síncrona del ETL en un hilo separado para no bloquear FastAPI.
     """
     return await asyncio.to_thread(etl_bdns.ingest_bdns_for_municipio, codigo_ine)
 
 
 async def get_grants_summary_all(db: AsyncSession) -> Dict[str, Dict]:
     """
-    Resumen de ayudas por municipio (para el mapa, el listado y el motor WLC):
-    {codigo_ine: {"num_ayudas_abiertas", "num_ayudas_total", "presupuesto_abiertas"}}.
-    Los municipios sin ninguna asignación no aparecen (quien llama debe tratarlos como 0).
+    Devuelve el resumen de ayudas abiertas, totales y presupuesto acumulado por municipio.
+    Los municipios sin asignaciones no se incluyen en el diccionario resultante.
     """
     resultado = await db.execute(
         text(
@@ -84,7 +72,7 @@ async def get_grants_summary_all(db: AsyncSession) -> Dict[str, Dict]:
 
 
 async def get_num_ayudas_abiertas(db: AsyncSession, codigo_ine: str) -> int:
-    """Número de convocatorias abiertas asignadas a un municipio (campo `num_ayudas_abiertas` de P2/P5)."""
+    """Devuelve el número de convocatorias abiertas asignadas al municipio indicado."""
     resultado = await db.execute(
         text(
             f"""
@@ -106,11 +94,8 @@ async def get_convocatorias(
     solo_abiertas: bool = True,
 ) -> List[Dict]:
     """
-    Consulta 4: convocatorias de la BDNS, ordenadas por fin de plazo más próximo.
-    - `codigo_ine`: solo las asignadas a ese municipio (incluye `regla_asignacion`).
-    - `categoria`: coincidencia parcial, sin distinguir mayúsculas, con la finalidad BDNS (ej. 'vivienda').
-    - `solo_abiertas`: por defecto solo las que siguen abiertas hoy.
-    Todos los valores van como parámetros enlazados (sin concatenar texto del usuario en el SQL).
+    Implementa la Consulta 4 devolviendo convocatorias ordenadas por fin de plazo más próximo.
+    Permite filtrar opcionalmente por código INE del municipio, finalidad y estado abierto.
     """
     params: Dict[str, object] = {}
     condiciones: List[str] = []

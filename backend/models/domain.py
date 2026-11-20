@@ -14,9 +14,12 @@ from core.database import Base
 
 
 class PuntoWGS84(sa.types.UserDefinedType):
+    """Tipo SQLAlchemy personalizado para columnas espaciales geometry(Point, 4326) de PostGIS."""
+
     cache_ok = True
 
     def get_col_spec(self, **kwargs):
+        """Devuelve la especificación SQL del tipo espacial en PostGIS."""
         return "geometry(Point, 4326)"
 
 
@@ -38,9 +41,8 @@ class Municipio(Base):
 
 
 class DemografiaAnual(Base):
-    """
-    Tabla distribuida `demografia_anual` (Sección 7.1.2 - P2).
-    """
+    """Serie demográfica anual por municipio (`demografia_anual`)."""
+
     __tablename__ = "demografia_anual"
 
     codigo_ine: Mapped[str] = mapped_column(
@@ -72,11 +74,8 @@ class MetricaInfraestructura(Base):
 
 
 class CentroSanitario(Base):
-    """
-    Tabla de referencia (Reference Table) `centros_sanitarios` (Sección 7.1.4 - P3).
-    Almacena el directorio de Centros de Salud, Consultorios Locales y Puntos de Urgencias
-    extraídos del portal de Datos Abiertos de la Comunidad de Madrid.
-    """
+    """Directorio de centros sanitarios y puntos de urgencias de la Comunidad de Madrid (`centros_sanitarios`)."""
+
     __tablename__ = "centros_sanitarios"
 
     id_centro: Mapped[str] = mapped_column(String(40), primary_key=True)
@@ -93,15 +92,10 @@ class CentroSanitario(Base):
 
 class Convocatoria(Base):
     """
-    Tabla de referencia `convocatorias` (Sección 7.1.5 - P4): catálogo de convocatorias de la BDNS.
-
-    Se corresponde columna a columna con la sección 5.1 de db/schema.sql:
-    - `organo_convocante` es una columna GENERATED de PostgreSQL; con `Computed` el ORM sabe que
-      no debe incluirla en los INSERT/UPDATE y solo la lee.
-    - `poblacion_max_objetivo` NULL = la convocatoria no tiene umbral de población.
-    - `finalidad` (añadida por P4) = `descripcionFinalidad` de la BDNS; alimenta el filtro `categoria`.
-    - Los CHECK e índices solo viven en schema.sql: la tabla la crea schema.sql, el ORM no usa create_all().
+    Catálogo de convocatorias de subvenciones de la BDNS (`convocatorias`).
+    `organo_convocante` es una columna generada en PostgreSQL y `poblacion_max_objetivo` admite NULL si no hay umbral.
     """
+
     __tablename__ = "convocatorias"
 
     codigo_bdns: Mapped[str] = mapped_column(String(30), primary_key=True)
@@ -126,13 +120,10 @@ class Convocatoria(Base):
 
 class ConvocatoriaMunicipio(Base):
     """
-    Tabla distribuida `convocatoria_municipio` (Sección 7.1.6 - P4): resultado de asignar cada
-    convocatoria a los municipios a los que aplica.
-
-    Clave primaria compuesta (codigo_ine, codigo_bdns), con codigo_ine primero (columna de reparto en Citus,
-    co-localizada con demografia_anual y metricas_infraestructura).
-    `regla_asignacion` ∈ {'organo_local', 'umbral_poblacion', 'region_completa'} (CHECK en schema.sql).
+    Relación de convocatorias asignadas a cada municipio (`convocatoria_municipio`).
+    Usa clave primaria compuesta (`codigo_ine`, `codigo_bdns`) y registra la `regla_asignacion` aplicada.
     """
+
     __tablename__ = "convocatoria_municipio"
 
     codigo_ine: Mapped[str] = mapped_column(

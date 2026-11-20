@@ -10,13 +10,18 @@ except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en 
     PYDANTIC_AVAILABLE = False
 
     def ConfigDict(**kwargs: Any) -> Dict[str, Any]:  # type: ignore
+        """Devuelve un diccionario de configuración cuando Pydantic no está instalado."""
         return kwargs
 
     class _DefaultFactory:
+        """Contenedor auxiliar para valores por defecto generados mediante fábrica."""
+
         def __init__(self, factory: Callable[[], Any]):
+            """Guarda la función generadora del valor por defecto."""
             self.factory = factory
 
     def _serialize_json(value: Any) -> Any:
+        """Convierte fechas, colecciones y modelos anidados a estructuras serializables en JSON."""
         if isinstance(value, (date, datetime)):
             return value.isoformat()
         if isinstance(value, list):
@@ -28,7 +33,10 @@ except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en 
         return value
 
     class BaseModel:  # type: ignore
+        """Sustituto ligero de `pydantic.BaseModel` para pruebas unitarias sin Pydantic."""
+
         def __init__(self, **data: Any):
+            """Inicializa los valores por defecto del esquema y asigna los datos recibidos."""
             for cls in reversed(type(self).__mro__):
                 if cls is object or cls is BaseModel:
                     continue
@@ -45,12 +53,14 @@ except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en 
                 setattr(self, k, v)
 
         def model_dump(self, **kwargs: Any) -> Dict[str, Any]:
+            """Serializa los campos del modelo a un diccionario."""
             raw = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
             if kwargs.get("mode") == "json":
                 return {k: _serialize_json(v) for k, v in raw.items()}
             return raw
 
         def dict(self, **kwargs: Any) -> Dict[str, Any]:
+            """Alias de `model_dump` para compatibilidad."""
             return self.model_dump(**kwargs)
 
     def Field(  # type: ignore
@@ -59,6 +69,7 @@ except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en 
         default_factory: Optional[Callable[[], Any]] = None,
         **kwargs: Any,
     ) -> Any:
+        """Sustituto ligero de `pydantic.Field` que resuelve valores por defecto y fábricas."""
         if default_factory is not None:
             return _DefaultFactory(default_factory)
         return None if default is Ellipsis else default

@@ -13,10 +13,14 @@ except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en 
     _HAS_PYDANTIC_SETTINGS = False
 
     def ConfigDict(**kwargs):  # type: ignore
+        """Devuelve la configuración como diccionario cuando falta pydantic."""
         return kwargs
 
     class BaseSettings:  # type: ignore
+        """Clase base mínima para leer atributos de configuración sin pydantic-settings."""
+
         def __init__(self, **kwargs):
+            """Asigna los atributos de clase sobrescribiéndolos con `kwargs` si llegan."""
             for attr_name, attr_val in type(self).__dict__.items():
                 if not attr_name.startswith("_") and attr_name != "model_config" and not callable(attr_val):
                     setattr(self, attr_name, kwargs.get(attr_name, attr_val))

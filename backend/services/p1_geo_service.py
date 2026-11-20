@@ -41,21 +41,21 @@ METRICAS_FIELDS = (
 
 
 async def get_all_municipios_base(db: AsyncSession) -> list[dict]:
-    """Lista también los municipios pendientes de carga de métricas."""
+    """Devuelve todos los municipios del catálogo ordenados por nombre junto con sus métricas si ya están cargadas."""
     result = await db.execute(LIST_MUNICIPIOS)
     return [dict(row) for row in result.mappings()]
 
 
 async def get_municipio_by_ine(db: AsyncSession, codigo_ine: str) -> dict | None:
-    """Devuelve el municipio y sus métricas, si existen."""
+    """Busca un municipio por su código INE y devuelve sus datos junto con las métricas disponibles, o None si no existe."""
     result = await db.execute(GET_MUNICIPIO, {"codigo_ine": codigo_ine})
     row = result.mappings().one_or_none()
     return dict(row) if row is not None else None
 
 
 async def hydrate_infraestructura_on_demand(db: AsyncSession, codigo_ine: str) -> dict:
-    """
-    Reutiliza las métricas persistidas o ejecuta el ETL síncrono fuera del event loop.
+    """Reutiliza las métricas persistidas del municipio o ejecuta el ETL síncrono fuera del event loop.
+
     El orquestador actualiza el estado global del municipio después de todos los módulos.
     """
     municipio = await get_municipio_by_ine(db, codigo_ine)

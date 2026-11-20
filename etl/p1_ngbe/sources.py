@@ -37,6 +37,7 @@ class SourceError(RuntimeError):
 
 
 def _download(url: str) -> bytes:
+    """Descarga el contenido en bytes de una URL aplicando el tiempo de espera configurado. Lanza SourceError si falla la petición."""
     request = Request(url, headers={"User-Agent": "ReHabitar-P1/1.0"})
     try:
         with urlopen(request, timeout=float(os.getenv("P1_HTTP_TIMEOUT", "30"))) as response:
@@ -47,12 +48,13 @@ def _download(url: str) -> bytes:
 
 
 def _open_workbook(url: str):
+    """Descarga un libro Excel desde una URL y lo abre en modo de solo lectura."""
     content = _download(url)
     return load_workbook(BytesIO(content), read_only=True, data_only=True, keep_links=False)
 
 
 def fetch_municipios_ign_api() -> list[dict]:
-    """Lee la publicación municipal del IGN derivada del NGMEP."""
+    """Lee la publicación municipal del IGN derivada del NGMEP y extrae los municipios de Madrid. Devuelve la lista ordenada por código INE con sus coordenadas y comarca."""
     book = _open_workbook(IGN_MUNICIPIOS_URL)
     municipios = {}
     try:
@@ -91,6 +93,7 @@ def fetch_municipios_ign_api() -> list[dict]:
 
 
 def _percentage(value, codigo: str) -> float:
+    """Convierte una proporción entre 0 y 1 a porcentaje redondeado a dos decimales. Lanza SourceError si el valor no es válido para el municipio."""
     # La hoja expresa proporciones y contiene desviaciones numéricas mínimas de 1.
     if not isinstance(value, (int, float)) or not -0.00001 <= value <= 1.00001:
         raise SourceError(f"Cobertura municipal no disponible para {codigo}.")
@@ -99,6 +102,7 @@ def _percentage(value, codigo: str) -> float:
 
 @lru_cache(maxsize=1)
 def _read_coverage() -> dict[str, tuple[object, object]]:
+    """Descarga y cachea el libro de SETELECO con las coberturas FTTH y 4G de junio de 2025 para los municipios de Madrid."""
     book = _open_workbook(COBERTURA_URL)
     try:
         rows = book["Municipio_%hogar"].values
@@ -115,6 +119,7 @@ def _read_coverage() -> dict[str, tuple[object, object]]:
 
 
 def get_coverage(codigo_ine: str) -> tuple[float, float]:
+    """Devuelve los porcentajes de cobertura de fibra (FTTH) y móvil (4G) de un municipio según SETELECO."""
     coverage = _read_coverage()
     try:
         fiber, mobile = coverage[codigo_ine]
@@ -124,6 +129,7 @@ def get_coverage(codigo_ine: str) -> tuple[float, float]:
 
 
 def _ide_lines(collection: str, filters: dict[str, str], latitud: float, longitud: float) -> str:
+    """Consulta una colección de IDEE ampliando el radio de búsqueda (1, 5 y 15 km) hasta encontrar tramos. Devuelve las geometrías halladas en formato GeoJSON MultiLineString."""
     for radius_km in (1, 5, 15):
         lat_delta = radius_km / 110.5
         lon_delta = radius_km / (111.3 * cos(radians(latitud)))
@@ -151,7 +157,7 @@ def _ide_lines(collection: str, filters: dict[str, str], latitud: float, longitu
 
 
 def get_infrastructure_lines(latitud: float, longitud: float) -> tuple[str, str]:
-    """Devuelve tramos pavimentados y cursos naturales permanentes del IGN."""
+    """Obtiene de IDEE las geometrías GeoJSON de vías pavimentadas y cursos naturales permanentes cercanos a unas coordenadas."""
     return (
         _ide_lines(
             "roadlink", {"surfacecategory": "paved", "fictitious": "false"}, latitud, longitud

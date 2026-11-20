@@ -1,12 +1,6 @@
 """
-Servicio P5.1 - Integración Virtual en Tiempo Real con API CartoCiudad (IGN)
-Responsable: Desarrollador P5
-
-REGLA ARQUITECTÓNICA DE LA PROPUESTA (Sección 6.3, 7.3 y Diagrama Sección 9):
-"El tiempo de trayecto hacia el punto sanitario NO se almacena en ninguna tabla para
-evitar obsolescencia. Al consultar un municipio, el backend identifica el punto
-asistencial más cercano en PostGIS y realiza la llamada REST en tiempo real a la API
-de CartoCiudad, fusionando estos valores en memoria con el motor WLC."
+Servicio P5.1: cálculo de rutas por carretera en tiempo real con la API CartoCiudad (IGN).
+Mantiene una caché efímera en memoria y usa respaldo Haversine si la API externa falla, sin guardar rutas en PostgreSQL.
 """
 
 import asyncio
@@ -42,9 +36,7 @@ _CARTOCIUDAD_MEM_CACHE: Dict[Tuple[float, float, float, float], Dict[str, Any]] 
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calcula la distancia ortodrómica Haversine en kilómetros entre dos coordenadas WGS84.
-    """
+    """Calcula la distancia geodésica Haversine en kilómetros entre dos coordenadas WGS84."""
     phi1 = math.radians(float(lat1))
     phi2 = math.radians(float(lat2))
     d_phi = math.radians(float(lat2) - float(lat1))
@@ -62,9 +54,8 @@ def build_curved_mountain_polyline(
     lat1: float, lon1: float, lat2: float, lon2: float, steps: int = 12
 ) -> List[List[float]]:
     """
-    Genera una polilínea interpolada `[[lat, lon], ...]` de respaldo para Leaflet
-    con curvatura suave de trazado de montaña cuando CartoCiudad no esté accesible.
-    Garantiza exactamente `steps + 1` puntos con coincidencia exacta en los extremos.
+    Genera una polilínea curva de respaldo en formato `[[lat, lon], ...]` para Leaflet.
+    Devuelve `steps + 1` puntos conservando exactamente los extremos de origen y destino.
     """
     n_steps = max(1, int(steps))
     p_orig = [float(lat1), float(lon1)]
@@ -96,9 +87,8 @@ def compute_fallback_route(
     lat_orig: float, lon_orig: float, lat_dest: float, lon_dest: float
 ) -> Dict[str, Any]:
     """
-    Cálculo de respaldo en memoria (Haversine * factor de sinuosidad 1.32x y
-    velocidad media rural de 45 km/h) para garantizar que la Consulta 2 y el motor WLC
-    nunca fallen durante la demostración en vivo si CartoCiudad sufre caídas o timeouts.
+    Calcula una ruta de respaldo en memoria usando Haversine, sinuosidad 1.32x y velocidad rural de 45 km/h.
+    Garantiza respuesta para la consulta sanitaria y el motor WLC cuando CartoCiudad no responde.
     """
     distancia_euclidea_km = haversine_km(lat_orig, lon_orig, lat_dest, lon_dest)
     distancia_carretera_km = round(distancia_euclidea_km * SINUOSITY_FACTOR, 2)
@@ -121,7 +111,7 @@ def _to_leaflet_latlon(coord_x: float, coord_y: float) -> List[float]:
 
 
 def _decode_encoded_polyline(encoded: str, precision: int = 5) -> List[List[float]]:
-    """Decodifica una cadena Google Encoded Polyline (precision 1e-5 usada por CartoCiudad IGN)."""
+    """Decodifica una cadena Google Encoded Polyline (precisión 1e-5 usada por CartoCiudad) a puntos [lat, lon]."""
     if not isinstance(encoded, str) or not encoded:
         return []
 
@@ -169,9 +159,8 @@ def _decode_encoded_polyline(encoded: str, precision: int = 5) -> List[List[floa
 
 def _parse_cartociudad_geometry(raw_geom: Any) -> List[List[float]]:
     """
-    Extrae una polilínea `[[lat, lon], ...]` desde la geometría devuelta por CartoCiudad
-    soportando Encoded Polyline (`geom` de IGN), WKT (`LINESTRING` / `MULTILINESTRING`),
-    diccionario o cadena GeoJSON y listas de puntos.
+    Extrae una polilínea `[[lat, lon], ...]` desde la geometría devuelta por CartoCiudad.
+    Soporta Encoded Polyline, WKT (`LINESTRING` / `MULTILINESTRING`), GeoJSON y listas de puntos.
     """
     if not raw_geom:
         return []
@@ -312,7 +301,7 @@ def _fetch_cartociudad_sync(params: Dict[str, str], timeout: float) -> Any:
 
 
 async def _request_cartociudad(params: Dict[str, str], timeout: float) -> Any:
-    """Realiza la petición GET asíncrona usando `httpx.AsyncClient` si está disponible."""
+    """Realiza la petición GET asíncrona a CartoCiudad con `httpx`, o con `requests` en un hilo como respaldo."""
     if httpx is not None:
         async with httpx.AsyncClient(
             timeout=timeout,
@@ -340,13 +329,8 @@ async def calculate_route_cartociudad(
     force_refresh: bool = False,
 ) -> Dict[str, Any]:
     """
-    Integración Virtual en Tiempo Real (Consulta 2 y Motor WLC):
-    1. Consulta caché efímera en memoria RAM (`_CARTOCIUDAD_MEM_CACHE`) salvo `force_refresh=True`.
-    2. Realiza petición HTTP GET asíncrona en tiempo real a
-       `https://www.cartociudad.es/services/api/route` con `orig` y `dest`.
-    3. Extrae `distancia_carretera_km`, `tiempo_estimado_min` y `geometria_ruta` (`[[lat, lon], ...]`).
-    4. Si falla, expira el timeout o devuelve datos inválidos, retorna `compute_fallback_route(...)`.
-    5. Retornar el diccionario en memoria al Mediador FastAPI SIN guardarlo en PostgreSQL.
+    Calcula la ruta por carretera en tiempo real mediante la API de CartoCiudad y una caché efímera en memoria.
+    Si la petición falla o devuelve datos inválidos, recurre al cálculo de respaldo sin guardar rutas en PostgreSQL.
     """
     cache_key = (
         round(float(lat_orig), 5),

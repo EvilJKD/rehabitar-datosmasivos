@@ -8,6 +8,7 @@ try:
 except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en host sin sqlalchemy
 
     def text(sql: str) -> str:  # type: ignore
+        """Devuelve la consulta SQL sin envolver cuando SQLAlchemy no está instalado."""
         return sql
 
     AsyncSession = Any  # type: ignore

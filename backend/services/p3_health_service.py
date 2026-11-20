@@ -1,10 +1,9 @@
 """
-Servicio P3 - Análisis Espacial PostGIS de Accesibilidad Sanitaria (KNN <->)
-Responsable: Desarrollador P3
+Servicio P3 de accesibilidad sanitaria con consultas espaciales KNN (`<->`) en PostGIS.
 
-Implementa la Consulta 2 de la Propuesta (Sección 7.2) empleando el operador
-espacial KNN (`<->`) acelerado mediante índices GiST (`idx_centros_sanitarios_geom`
-e `idx_centros_urgencias_geom`) y el cálculo geodésico `ST_DistanceSphere`.
+Gestiona la hidratación bajo demanda de `centros_sanitarios` desde la API de la CAM
+y calcula los centros de urgencias y consultorios más cercanos a cada municipio usando
+índices GiST y `ST_DistanceSphere`.
 """
 
 import asyncio
@@ -19,6 +18,7 @@ try:
 except ImportError:  # pragma: no cover - permite pruebas unitarias sin entorno Docker
 
     def text(sql: str) -> str:  # type: ignore
+        """Devuelve la consulta SQL sin modificar cuando SQLAlchemy no está disponible."""
         return sql
 
     AsyncSession = Any  # type: ignore
@@ -85,7 +85,7 @@ SQL_UPSERT_CENTRO_SANITARIO = text(
 )
 
 # Consulta espacial KNN (PostGIS <->) para obtener el centro con urgencias más cercano
-# a cada municipio registrado en la tabla `municipios` (Consulta 2 de la Propuesta).
+# a cada municipio registrado en la tabla `municipios`.
 SQL_KNN_NEAREST_EMERGENCY_ALL = text(
     """
     SELECT
@@ -229,9 +229,8 @@ async def hydrate_health_centers_on_demand(
     force_refresh: bool = False,
 ) -> int:
     """
-    Hidrata bajo demanda `centros_sanitarios` consultando el endpoint de Datos Abiertos
-    de la Comunidad de Madrid cuando el municipio o la red de urgencias aún no están
-    persistidos en PostgreSQL (o si `force_refresh=True`).
+    Descarga e inserta bajo demanda los centros sanitarios de la CAM si el municipio
+    o la red de urgencias aún no están en PostgreSQL (o si `force_refresh=True`).
     Devuelve el número de centros insertados o actualizados.
     """
     resolved_municipio = municipio_nombre.strip() if municipio_nombre else None
@@ -290,12 +289,9 @@ async def hydrate_health_centers_on_demand(
 
 async def get_nearest_emergency_all(db: AsyncSession) -> Dict[str, Dict[str, Any]]:
     """
-    Ejecuta una consulta espacial en PostGIS que obtiene para cada municipio
-    su centro sanitario con urgencias 24h (`tiene_urgencias = TRUE`) más cercano.
-    - Usa `CROSS JOIN LATERAL` ordenando por el operador espacial KNN `ORDER BY m.geom <-> c.geom LIMIT 1`
-      para aprovechar el índice GiST parcial `idx_centros_urgencias_geom`.
-    - Calcula la distancia en línea recta en kilómetros usando `ST_DistanceSphere(m.geom, cs.geom) / 1000.0`.
-    Devuelve un diccionario indexado por `codigo_ine`.
+    Obtiene para cada municipio el centro con urgencias más cercano mediante una
+    búsqueda KNN (`<->`) y distancia geodésica en PostGIS. Devuelve un diccionario
+    indexado por `codigo_ine`.
     """
     result = await db.execute(SQL_KNN_NEAREST_EMERGENCY_ALL)
     rows = result.mappings().all()
@@ -314,12 +310,9 @@ async def get_nearest_health_centers_for_municipio(
     force_refresh: bool = False,
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """
-    Dado un `codigo_ine`, garantiza primero la hidratación bajo demanda de los centros
-    sanitarios desde el endpoint de la CAM y ejecuta la búsqueda KNN en PostGIS
-    (`ORDER BY m.geom <-> c.geom LIMIT 1`) para encontrar:
-    1. `"urgencias"`: El centro con `tiene_urgencias = TRUE` más cercano.
-    2. `"consultorio"`: El centro sanitario o consultorio local más cercano (con o sin urgencias).
-    Devuelve un diccionario `{"urgencias": ..., "consultorio": ...}`.
+    Hidrata bajo demanda los centros del municipio si faltan en la base de datos y
+    busca en PostGIS con KNN (`<->`) el centro de urgencias y el consultorio más cercanos.
+    Devuelve un diccionario con las claves `"urgencias"` y `"consultorio"`.
     """
     await hydrate_health_centers_on_demand(
         db, codigo_ine=codigo_ine, force_refresh=force_refresh
@@ -348,9 +341,9 @@ async def list_centros_sanitarios_service(
     force_refresh: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Lista los centros sanitarios almacenados en `centros_sanitarios` para su representación
-    en la capa cartográfica Leaflet (Visualización 1). Si el filtro solicitado aún no
-    tiene datos en BD (o `force_refresh=True`), hidrata bajo demanda desde la API de la CAM.
+    Lista los centros sanitarios almacenados filtrando opcionalmente por urgencias
+    o municipio. Si no hay resultados locales (o `force_refresh=True`), hidrata los
+    datos bajo demanda desde la API de la CAM.
     """
     conditions = []
     params: Dict[str, Any] = {}
