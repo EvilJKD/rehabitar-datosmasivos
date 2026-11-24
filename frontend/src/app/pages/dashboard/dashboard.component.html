@@ -7,6 +7,13 @@
     <p class="text-label-lg text-surface-600 mt-xs">
       Sierra Norte de la Comunidad de Madrid
     </p>
+    <p *ngIf="health" class="text-label-sm text-surface-600">Sistema {{ health.status }} · {{ health.municipios_hidratados }} de {{ health.total_municipios }} municipios con datos · {{ health.database }}</p>
+    <p *ngIf="healthError" class="text-error-700">No se pudo consultar el estado del sistema.</p>
+    <div class="flex flex-wrap gap-2 mt-4">
+      <button class="btn-outline" [disabled]="isLoading" (click)="loadDashboardData()">Todos</button>
+      <button class="btn-outline" [disabled]="isLoading" (click)="loadDashboardData({ min_wlc: 75, requiere_fibra: true })">WLC ≥ 75 y fibra</button>
+      <button class="btn-outline" [disabled]="isLoading" (click)="loadDashboardData({ con_ayuda_abierta: true })">Con ayudas abiertas</button>
+    </div>
   </div>
 
   <!-- Loading state -->
@@ -100,7 +107,7 @@
               Viabilidad territorial según Weighted Linear Combination
             </p>
           </div>
-          <app-territorio-map />
+          <app-territorio-map [municipios]="municipios" />
         </div>
       </div>
 

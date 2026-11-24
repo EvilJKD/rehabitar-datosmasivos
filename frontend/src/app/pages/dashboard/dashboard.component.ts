@@ -1,9 +1,9 @@
-import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import { MunicipioService } from '../../core/services/municipio.service';
-import { Municipio, KPISummary } from '../../core/models/municipio.model';
+import { FiltrosMunicipios, MunicipioService } from '../../core/services/municipio.service';
+import { Municipio, KPISummary, Health } from '../../core/models/municipio.model';
 import { KpiCardComponent } from '../../shared/components/kpi-card/kpi-card.component';
 import { TerritorioMapComponent } from '../../shared/components/territorio-map/territorio-map.component';
 import { RangoMunicipalComponent } from '../../shared/components/rango-municipal/rango-municipal.component';
@@ -37,13 +37,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
   municipios: Municipio[] = [];
   isLoading = true;
   error: string | null = null;
+  health: Health | null = null;
+  healthError = false;
 
   private destroy$ = new Subject<void>();
 
-  constructor(private municipioService: MunicipioService) {}
+  constructor(private municipioService: MunicipioService, private cdr: ChangeDetectorRef) {}
 
   ngOnInit(): void {
     this.loadDashboardData();
+    this.municipioService.healthCheck().pipe(takeUntil(this.destroy$)).subscribe({
+      next: health => { this.health = health; this.cdr.markForCheck(); },
+      error: err => { console.error('Error de estado del sistema:', err); this.healthError = true; this.cdr.markForCheck(); }
+    });
   }
 
   ngOnDestroy(): void {
@@ -57,37 +63,29 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * - Calculate KPIs from WLC scores
    * - Trigger map and ranking updates
    */
-  private loadDashboardData(): void {
+  loadDashboardData(filters: FiltrosMunicipios = {}): void {
     this.isLoading = true;
     this.error = null;
 
     this.municipioService
-      .getMunicipios()
+      .getMunicipios(filters)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (municipios: Municipio[]) => {
           this.municipios = municipios;
           this.kpiData = this.calculateKPIs(municipios);
           this.isLoading = false;
+          this.cdr.markForCheck();
         },
         error: (err) => {
           console.error('Error loading dashboard:', err);
           this.error = 'No se pudieron cargar los datos del dashboard';
           this.isLoading = false;
+          this.cdr.markForCheck();
         }
       });
   }
 
-  /**
-   * Calculate KPI summary from municipalities array
-   * 
-   * Logic:
-   * - Total analyzed: Count all municipios
-   * - Alto riesgo (ROJO): WLC < 0.4
-   * - Riesgo medio (ÁMBAR): 0.4 <= WLC <= 0.65
-   * - Favorable (VERDE): WLC > 0.65
-   * - Pendiente: No WLC score (not hydrated)
-   */
   private calculateKPIs(municipios: Municipio[]): KPISummary {
     const summary: KPISummary = {
       total_analizados: municipios.length,
@@ -98,17 +96,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     };
 
     municipios.forEach((municipio) => {
-      if (!municipio.wlc || municipio.wlc.indice_wlc === null) {
-        summary.pendientes++;
-      } else {
-        const wlc = municipio.wlc.indice_wlc;
-        if (wlc < 0.4) {
-          summary.riesgo_alto++;
-        } else if (wlc <= 0.65) {
-          summary.riesgo_medio++;
-        } else {
-          summary.favorable++;
-        }
+      switch (municipio.wlc?.semaforo ?? 'PENDIENTE') {
+        case 'ROJO': summary.riesgo_alto++; break;
+        case 'AMBAR': summary.riesgo_medio++; break;
+        case 'VERDE': summary.favorable++; break;
+        case 'PENDIENTE': summary.pendientes++; break;
       }
     });
 

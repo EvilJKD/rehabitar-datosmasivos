@@ -1,15 +1,14 @@
+@import "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap";
+@import "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap";
-@import "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200";
 
 @layer base {
   html {
     @apply scroll-smooth;
   }
-
   body {
     @apply bg-surface text-on-surface antialiased;
     font-family: "Inter", system-ui, -apple-system, sans-serif;
@@ -37,42 +36,42 @@
 @layer components {
   /* Buttons */
   .btn-primary {
-    @apply px-6 py-3 bg-primary-900 text-white rounded-lg font-label-semibold hover:bg-primary-800 transition;
+    @apply px-6 py-3 bg-primary text-white rounded-lg font-semibold hover:bg-primary-container transition;
   }
 
   .btn-secondary {
-    @apply px-6 py-3 bg-secondary-900 text-white rounded-lg font-label-semibold hover:bg-secondary-800 transition;
+    @apply px-6 py-3 bg-secondary text-white rounded-lg font-semibold hover:bg-secondary-container transition;
   }
 
   .btn-outline {
-    @apply px-6 py-3 border-2 border-primary-900 text-primary-900 rounded-lg font-label-semibold hover:bg-primary-50 transition;
+    @apply px-6 py-3 border-2 border-primary text-primary rounded-lg font-semibold hover:bg-surface-container transition;
   }
 
   /* Input Fields */
   .input-base {
-    @apply px-4 py-2 border-2 border-surface-container rounded-lg font-body-sm placeholder-surface-600 focus:outline-none focus:border-primary-900 transition;
+    @apply px-4 py-2 border-2 border-surface-container rounded-lg font-body-sm placeholder-on-surface-variant focus:outline-none focus:border-primary transition;
   }
 
   /* Cards */
   .card {
-    @apply bg-white rounded-lg shadow-elevation-sm border-2 border-surface-container p-md;
+    @apply bg-white rounded-lg shadow-sm border-2 border-surface-container p-space-md;
   }
 
   /* Badges */
   .badge-verde {
-    @apply inline-flex items-center gap-xs px-sm py-xs bg-favorable-100 text-favorable-700 rounded-full font-label-xs font-label-semibold;
+    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-secondary-container text-on-secondary-container rounded-full font-label-sm font-semibold;
   }
 
   .badge-ambar {
-    @apply inline-flex items-center gap-xs px-sm py-xs bg-vulnerable-100 text-vulnerable-700 rounded-full font-label-xs font-label-semibold;
+    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-amber-100 text-amber-900 rounded-full font-label-sm font-semibold;
   }
 
   .badge-rojo {
-    @apply inline-flex items-center gap-xs px-sm py-xs bg-high-risk-100 text-high-risk-700 rounded-full font-label-xs font-label-semibold;
+    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-error-container text-on-error-container rounded-full font-label-sm font-semibold;
   }
 
   .badge-pendiente {
-    @apply inline-flex items-center gap-xs px-sm py-xs bg-pending-100 text-pending-700 rounded-full font-label-xs font-label-semibold;
+    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-surface-container text-on-surface-variant rounded-full font-label-sm font-semibold;
   }
 
   /* Tables */
@@ -85,11 +84,11 @@
   }
 
   .table-base th {
-    @apply px-4 py-3 text-left font-label-sm font-label-semibold text-surface-900;
+    @apply px-4 py-3 text-left font-label-sm font-semibold text-on-surface;
   }
 
   .table-base td {
-    @apply px-4 py-3 text-label-sm text-surface-700 border-b border-surface-container;
+    @apply px-4 py-3 text-label-sm text-on-surface-variant border-b border-surface-container;
   }
 
   .table-base tbody tr:hover {
@@ -99,7 +98,7 @@
 
 @layer utilities {
   .text-gradient {
-    @apply bg-gradient-to-r from-primary-900 to-secondary-900 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent;
   }
 
   .shadow-elevation-sm {
@@ -114,5 +113,3 @@
     @apply shadow-lg;
   }
 }
-
-@import "app/app.css";

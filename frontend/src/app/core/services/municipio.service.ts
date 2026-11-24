@@ -1,74 +1,70 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Municipio, Convocatoria, DemografiaPunto, KPISummary } from '../models/municipio.model';
+import { CentroSanitario, Convocatoria, Demografia, Health, Municipio, MunicipioDetail, Semaforo } from '../models/municipio.model';
 
-@Injectable({
-  providedIn: 'root'
-})
+export interface Pesos {
+  w_carretera?: number;
+  w_sanidad?: number;
+  w_conectividad?: number;
+  w_hidrico?: number;
+  w_demografia?: number;
+  w_demo?: number;
+  w_health?: number;
+  w_infra?: number;
+}
+
+export interface FiltrosMunicipios extends Pesos {
+  semaforo?: Semaforo;
+  min_wlc?: number;
+  requiere_fibra?: boolean;
+  min_fibra_pct?: number;
+  con_ayuda_abierta?: boolean;
+}
+
+function queryParams(filters: object): HttpParams {
+  let params = new HttpParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params = params.set(key, String(value));
+    }
+  }
+  return params;
+}
+
+@Injectable({ providedIn: 'root' })
 export class MunicipioService {
-  private apiUrl = '/api';
+  private readonly apiUrl = '/api';
 
   constructor(private http: HttpClient) {}
 
-  // Obtener todos los municipios
-  getMunicipios(filters?: {
-    semaforo?: string;
-    w_demo?: number;
-    w_health?: number;
-    w_grants?: number;
-    w_infra?: number;
-  }): Observable<Municipio[]> {
-    let params = new HttpParams();
-    if (filters) {
-      if (filters.semaforo) params = params.set('semaforo', filters.semaforo);
-      if (filters.w_demo) params = params.set('w_demo', filters.w_demo.toString());
-      if (filters.w_health) params = params.set('w_health', filters.w_health.toString());
-      if (filters.w_grants) params = params.set('w_grants', filters.w_grants.toString());
-      if (filters.w_infra) params = params.set('w_infra', filters.w_infra.toString());
-    }
-    return this.http.get<Municipio[]>(`${this.apiUrl}/municipios`, { params });
+  getMunicipios(filters: FiltrosMunicipios = {}): Observable<Municipio[]> {
+    return this.http.get<Municipio[]>(`${this.apiUrl}/municipios`, { params: queryParams(filters) });
   }
 
-  // Obtener un municipio específico
-  getMunicipioDetail(codigoIne: string, forceRefresh = false): Observable<Municipio> {
-    let params = new HttpParams();
-    if (forceRefresh) params = params.set('force_refresh', 'true');
-    return this.http.get<Municipio>(`${this.apiUrl}/municipios/${codigoIne}`, { params });
+  getMunicipioDetail(codigoIne: string, forceRefresh = false, pesos: Pesos = {}): Observable<MunicipioDetail> {
+    return this.http.get<MunicipioDetail>(`${this.apiUrl}/municipios/${encodeURIComponent(codigoIne)}`, {
+      params: queryParams({ ...pesos, force_refresh: forceRefresh })
+    });
   }
 
-  // Forzar ingesta de un municipio
-  triggerMunicipioIngestion(codigoIne: string): Observable<Municipio> {
-    return this.http.post<Municipio>(`${this.apiUrl}/municipios/${codigoIne}/ingest`, {});
+  triggerMunicipioIngestion(codigoIne: string): Observable<MunicipioDetail> {
+    return this.http.post<MunicipioDetail>(`${this.apiUrl}/municipios/${encodeURIComponent(codigoIne)}/ingest`, {});
   }
 
-  // Obtener demografía de un municipio
-  getDemografia(codigoIne: string): Observable<{ serie_anual: DemografiaPunto[] }> {
-    return this.http.get<{ serie_anual: DemografiaPunto[] }>(
-      `${this.apiUrl}/municipios/${codigoIne}/demografia`
-    );
+  getDemografia(codigoIne: string): Observable<Demografia> {
+    return this.http.get<Demografia>(`${this.apiUrl}/municipios/${encodeURIComponent(codigoIne)}/demografia`);
   }
 
-  // Obtener convocatorias
-  getConvocatorias(filters?: {
-    codigo_ine?: string;
-    categoria?: string;
-  }): Observable<Convocatoria[]> {
-    let params = new HttpParams();
-    if (filters) {
-      if (filters.codigo_ine) params = params.set('codigo_ine', filters.codigo_ine);
-      if (filters.categoria) params = params.set('categoria', filters.categoria);
-    }
-    return this.http.get<Convocatoria[]>(`${this.apiUrl}/convocatorias`, { params });
+  getConvocatorias(filters: { codigo_ine?: string; categoria?: string; solo_abiertas?: boolean; abierta?: boolean } = {}): Observable<Convocatoria[]> {
+    return this.http.get<Convocatoria[]>(`${this.apiUrl}/convocatorias`, { params: queryParams(filters) });
   }
 
-  // Obtener centros sanitarios
-  getCentrosSanitarios(): Observable<any[]> {
-    return this.http.get<any[]>(`${this.apiUrl}/centros-sanitarios`);
+  getCentrosSanitarios(filters: { solo_urgencias?: boolean; municipio_nombre?: string; force_refresh?: boolean } = {}): Observable<CentroSanitario[]> {
+    return this.http.get<CentroSanitario[]>(`${this.apiUrl}/centros-sanitarios`, { params: queryParams(filters) });
   }
 
-  // Health check
-  healthCheck(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/health`);
+  healthCheck(): Observable<Health> {
+    return this.http.get<Health>(`${this.apiUrl}/health`);
   }
 }

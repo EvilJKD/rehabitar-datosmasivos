@@ -12,6 +12,19 @@ npm start
 
 Application runs at `http://localhost:4200/`
 
+### API y datos de prueba
+
+En desarrollo, `/api` se redirige a `http://localhost:8000` mediante
+`proxy.conf.json`; inicia el backend en ese puerto o modifica el destino del
+proxy. Las respuestas fallidas se muestran en la interfaz.
+
+Para probar sin backend, abre `http://localhost:4200/?mock=1`. El modo mock
+permanece activo durante la sesión de la pestaña; usa `?mock=0` para volver
+al backend. Los datos son ficticios e incluyen un municipio pendiente,
+una ficha con ruta y convocatorias abiertas y cerradas. Los mocks implementan
+los filtros visibles, pero no recalculan el WLC con pesos personalizados ni
+persisten la ingesta.
+
 ## Project Structure
 
 ```
