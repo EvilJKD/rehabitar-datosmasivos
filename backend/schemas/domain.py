@@ -1,135 +1,163 @@
-"""
-Schemas Pydantic alineados con las Secciones 4, 6.4, 6.5, 7.1, 7.2 y 7.3 de la Propuesta.
-"""
+"""Esquemas Pydantic de respuesta y serialización de la API de Re-Habitar PoC."""
 
-from pydantic import BaseModel
+from datetime import date
+from typing import Any, Dict, List, Optional
+
+from ._compat import BaseModel, ConfigDict, Field
 
 
 class WLCBreakdownSchema(BaseModel):
-    """
-    TODO (Responsable P5 - Sección 4 y 6.4):
-    Desglose pormenorizado de los 5 parámetros de habitabilidad (0 a 100):
-    - indice_wlc: float (Puntuación de Viabilidad Global 0-100, ej. 96.05 en Madarcos)
-    - semaforo: str ('VERDE', 'AMBAR', 'ROJO' o 'PENDIENTE')
-    - etiqueta_viabilidad: str
-    - score_acceso_carretera: float       (Indicador 1: Acceso por carretera asfaltada)
-    - score_proximidad_sanitaria: float   (Indicador 2: Proximidad a urgencias en minutos CartoCiudad)
-    - score_conectividad_digital: float   (Indicador 3: Fibra óptica + móvil)
-    - score_acceso_hidrico: float         (Indicador 4: Cercanía a recursos hídricos)
-    - score_inercia_demografica: float    (Indicador 5: Variación demográfica a 10 años)
-    - pesos_aplicados: dict
-    """
-    pass
+    """Desglose de la puntuación WLC (0 a 100), semáforo de viabilidad y pesos aplicados."""
+    indice_wlc: float = Field(..., description="Puntuación de Viabilidad Global 0-100 (ej. 96.05 en Madarcos)")
+    semaforo: str = Field(..., description="VERDE, AMBAR, ROJO o PENDIENTE")
+    etiqueta_viabilidad: str = Field(..., description="Etiqueta descriptiva de viabilidad")
+    score_acceso_carretera: float = Field(..., description="Indicador 1: Acceso por carretera asfaltada")
+    score_proximidad_sanitaria: float = Field(..., description="Indicador 2: Proximidad a urgencias (CartoCiudad)")
+    score_conectividad_digital: float = Field(..., description="Indicador 3: Fibra óptica FTTH + móvil")
+    score_acceso_hidrico: float = Field(..., description="Indicador 4: Cercanía a recursos hídricos")
+    score_inercia_demografica: float = Field(..., description="Indicador 5: Inercia demográfica a 10 años")
+    pesos_aplicados: Dict[str, float] = Field(..., description="Ponderaciones normalizadas aplicadas")
 
 
-class InfraestructuraSchema(BaseModel):
-    """
-    TODO (Responsable P1 - Sección 7.1.3):
-    - distancia_carretera_km: float
-    - distancia_recurso_hidrico_km: float
-    - cobertura_fibra_pct: float
-    - cobertura_movil_pct: float
-    - fecha_actualizacion: date
-    """
-    pass
+from .p1_geo import InfraestructuraSchema
+
+
+class CentroSanitarioSchema(BaseModel):
+    """Esquema de un centro sanitario de la Comunidad de Madrid y su distancia opcional al municipio."""
+    id_centro: str = Field(..., description="Identificador único del centro (ej. 'CS-28027')")
+    nombre: str = Field(..., description="Nombre oficial del centro sanitario")
+    tipo: str = Field(..., description="Tipología: Centro de Salud, Consultorio Local, etc.")
+    tiene_urgencias: bool = Field(
+        default=False, description="Indica si dispone de atención continuada / urgencias 24h"
+    )
+    municipio_nombre: Optional[str] = Field(None, description="Nombre del municipio donde se ubica")
+    direccion: Optional[str] = Field(None, description="Dirección postal completa")
+    horario: Optional[str] = Field(None, description="Horario de atención")
+    telefono: Optional[str] = Field(None, description="Teléfono de contacto")
+    latitud: float = Field(..., description="Latitud en WGS84 (EPSG:4326)")
+    longitud: float = Field(..., description="Longitud en WGS84 (EPSG:4326)")
+    distancia_euclidea_km: Optional[float] = Field(
+        None, description="Distancia en línea recta calculada en PostGIS (km)"
+    )
 
 
 class RutaSanitariaSchema(BaseModel):
-    """
-    TODO (Responsables P3 y P5 - Consulta 2 y Sección 7.3):
-    Resultado de la fusión en tiempo real entre KNN PostGIS y API CartoCiudad:
-    - id_centro: str (ej. 'CS-28027')
-    - nombre: str (ej. 'Consultorio Local Buitrago del Lozoya')
-    - tipo: str (ej. 'Centro de Salud / Urgencias')
-    - tiene_urgencias: bool
-    - latitud: float
-    - longitud: float
-    - distancia_euclidea_km: float (KNN PostGIS)
-    - distancia_carretera_km: float (En tiempo real desde CartoCiudad, ej. 11.4 km)
-    - tiempo_estimado_min: float (En tiempo real desde CartoCiudad, ej. 12.2 min)
-    - fuente_ruta: str ('API CartoCiudad IGN (Tiempo Real)' o 'Fallback Haversine')
-    - geometria_ruta: List[List[float]]
-    """
-    pass
+    """Centro sanitario más cercano obtenido por KNN en PostGIS junto con la ruta y tiempo estimados en tiempo real."""
+    id_centro: str = Field(..., description="Identificador del centro sanitario (ej. 'CS-28027')")
+    nombre: str = Field(..., description="Nombre del centro (ej. 'Consultorio Local Buitrago del Lozoya')")
+    tipo: str = Field(..., description="Tipología del centro (ej. 'Centro de Salud / Urgencias')")
+    tiene_urgencias: bool = Field(default=False, description="Indica si cuenta con servicio de urgencias")
+    municipio_nombre: Optional[str] = Field(None, description="Municipio del centro sanitario")
+    direccion: Optional[str] = Field(None, description="Dirección postal del centro")
+    horario: Optional[str] = Field(None, description="Horario de atención")
+    telefono: Optional[str] = Field(None, description="Teléfono de contacto")
+    latitud: float = Field(..., description="Latitud WGS84 del centro")
+    longitud: float = Field(..., description="Longitud WGS84 del centro")
+    distancia_euclidea_km: float = Field(..., description="Distancia en línea recta obtenida por KNN PostGIS (km)")
+    distancia_carretera_km: Optional[float] = Field(
+        None, description="Distancia real por carretera CartoCiudad (ej. 11.4 km)"
+    )
+    tiempo_estimado_min: Optional[float] = Field(
+        None, description="Tiempo estimado en coche CartoCiudad (ej. 12.2 min)"
+    )
+    fuente_ruta: Optional[str] = Field(
+        None, description="'API CartoCiudad IGN (Tiempo Real)' o 'Fallback Haversine (45 km/h)'"
+    )
+    geometria_ruta: List[List[float]] = Field(
+        default_factory=list,
+        description="Polilínea [[lat, lon], ...] hacia el centro de urgencias",
+    )
 
 
 class ConvocatoriaMunicipioItemSchema(BaseModel):
     """
-    TODO (Responsable P4 - Consulta 4 y Sección 7.1.5 / 7.1.6):
-    - codigo_bdns: str (ej. '921084')
-    - descripcion: str
-    - organo_nivel1: str
-    - organo_nivel2: Optional[str]
-    - organo_nivel3: Optional[str]
-    - organo_convocante: str
-    - fecha_recepcion: date
-    - inicio_solicitud: Optional[date]
-    - fin_solicitud: Optional[date]
-    - abierta: bool
-    - presupuesto_total: float
-    - tipo_beneficiario: Optional[str]
-    - url_bases: Optional[str]
-    - regla_asignacion: Optional[str] ('organo_local' | 'umbral_poblacion' | 'region_completa')
+    Convocatoria de la BDNS con su órgano convocante, plazo, presupuesto, finalidad y umbral poblacional opcional.
+    Incluye `regla_asignacion` cuando la consulta se filtra para un municipio concreto.
     """
-    pass
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo_bdns: str = Field(..., description="Código BDNS de la convocatoria (ej. '921084')")
+    descripcion: str
+    organo_nivel1: str = Field(..., description="'ESTADO', 'AUTONOMICA', 'LOCAL' u 'OTROS'")
+    organo_nivel2: Optional[str] = None
+    organo_nivel3: Optional[str] = None
+    organo_convocante: str = Field(..., description="Órgano más específico (nivel3 > nivel2 > nivel1)")
+    fecha_recepcion: date
+    inicio_solicitud: Optional[date] = None
+    fin_solicitud: Optional[date] = Field(None, description="Fin del plazo de solicitud (None = no publicado)")
+    abierta: bool
+    presupuesto_total: float = Field(..., ge=0)
+    tipo_beneficiario: Optional[str] = None
+    finalidad: Optional[str] = Field(None, description="Categoría BDNS (ej. 'Infraestructuras')")
+    poblacion_max_objetivo: Optional[int] = Field(None, description="Umbral de habitantes (None = sin umbral)")
+    url_bases: Optional[str] = None
+    regla_asignacion: Optional[str] = Field(
+        None, description="'organo_local' | 'umbral_poblacion' | 'region_completa' (solo al filtrar por municipio)"
+    )
 
 
 class MunicipioListItemSchema(BaseModel):
-    """
-    TODO: Elemento de `GET /api/municipios` (Consulta 1 y Mapa V1):
-    - codigo_ine, nombre, provincia, comarca, latitud, longitud
-    - hidratado: bool
-    - poblacion_actual: int
-    - variacion_10a_pct: float
-    - cobertura_fibra_pct: float
-    - num_ayudas_abiertas: int
-    - wlc: WLCBreakdownSchema
-    """
-    pass
+    """Resumen territorial de un municipio para el listado y mapa principal (`GET /api/municipios`)."""
+    codigo_ine: str
+    nombre: str
+    provincia: str = Field(default="Madrid")
+    comarca: str = Field(default="Sierra Norte")
+    latitud: float
+    longitud: float
+    hidratado: bool = Field(default=False)
+    poblacion_actual: Optional[int] = Field(default=None)
+    variacion_10a_pct: Optional[float] = Field(default=None)
+    cobertura_fibra_pct: Optional[float] = Field(default=None)
+    num_ayudas_abiertas: int = Field(default=0)
+    wlc: Optional[WLCBreakdownSchema] = Field(default=None)
 
 
 class MunicipioDetailSchema(BaseModel):
-    """
-    TODO: Ficha completa de `GET /api/municipios/{codigo_ine}` (Consultas 1, 2, 3, 4 y Fusión en Memoria):
-    - codigo_ine, nombre, provincia, comarca, latitud, longitud
-    - hidratado: bool
-    - origen_datos: str
-    - poblacion_inicial_10a: int
-    - poblacion_actual: int
-    - variacion_10a_pct: float
-    - preserva_masa_critica: bool
-    - inercia_demografica: str
-    - infraestructura: InfraestructuraSchema
-    - wlc: WLCBreakdownSchema
-    - urgencias_mas_cercana: RutaSanitariaSchema
-    - convocatorias: List[ConvocatoriaMunicipioItemSchema]
-    """
-    pass
+    """Ficha completa de un municipio con demografía, infraestructura, índice WLC, urgencias y convocatorias."""
+    codigo_ine: str
+    nombre: str
+    provincia: str = Field(default="Madrid")
+    comarca: str = Field(default="Sierra Norte")
+    latitud: float
+    longitud: float
+    hidratado: bool = Field(default=True)
+    origen_datos: str = Field(default="CACHE_POSTGRESQL")
+    poblacion_inicial_10a: Optional[int] = Field(default=None)
+    poblacion_actual: Optional[int] = Field(default=None)
+    variacion_10a_pct: Optional[float] = Field(default=None)
+    preserva_masa_critica: bool = Field(default=False)
+    inercia_demografica: str = Field(default="SIN_DATOS")
+    infraestructura: Optional[InfraestructuraSchema] = Field(default=None)
+    wlc: Optional[WLCBreakdownSchema] = Field(default=None)
+    urgencias_mas_cercana: Optional[RutaSanitariaSchema] = Field(default=None)
+    convocatorias: List[ConvocatoriaMunicipioItemSchema] = Field(default_factory=list)
 
 
 class DemografiaPuntoAnualSchema(BaseModel):
     """
-    TODO (Responsable P2 - Sección 7.1.2):
-    - anio: int
-    - poblacion: int
-    - poblacion_mayor_65: Optional[int]
-    - poblacion_menor_15: Optional[int]
-    - tasa_envejecimiento: Optional[float]
+    Dato demográfico de un municipio en un año concreto para la serie histórica.
+    Las columnas por grupo de edad admiten `None` cuando no hay desglose disponible en la fuente.
     """
-    pass
+    model_config = ConfigDict(from_attributes=True)
+
+    anio: int
+    poblacion: int
+    poblacion_mayor_65: Optional[int] = None
+    poblacion_menor_15: Optional[int] = None
+    tasa_envejecimiento: Optional[float] = None
 
 
 class DemografiaSerieResponseSchema(BaseModel):
     """
-    TODO (Responsable P2 - Consulta 3 y Visualización 2 en Chart.js):
-    - codigo_ine: str
-    - nombre: str
-    - poblacion_inicial_10a: int
-    - poblacion_actual: int
-    - variacion_10a_pct: float
-    - cobertura_fibra_pct: float
-    - distancia_urgencias_km: float
-    - num_ayudas_abiertas: int
-    - serie_anual: List[DemografiaPuntoAnualSchema]
+    Serie demográfica histórica de un municipio junto con sus variaciones e indicadores de contexto.
+    La población inicial a 10 años y los indicadores de infraestructura, sanidad o ayudas admiten `None` si no están disponibles.
     """
-    pass
+    codigo_ine: str
+    nombre: str
+    poblacion_inicial_10a: Optional[int] = None
+    poblacion_actual: int
+    variacion_10a_pct: Optional[float] = None
+    cobertura_fibra_pct: Optional[float] = None
+    distancia_urgencias_km: Optional[float] = None
+    num_ayudas_abiertas: Optional[int] = None
+    serie_anual: List[DemografiaPuntoAnualSchema]

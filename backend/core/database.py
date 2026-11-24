@@ -2,26 +2,47 @@
 Gestión de la conexión asíncrona a PostgreSQL/PostGIS con SQLAlchemy 2.0 y asyncpg.
 """
 
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import DeclarativeBase
+from typing import Any, AsyncGenerator
 
+from core.config import settings
 
-class Base(DeclarativeBase):
-    """Clase base declarativa para los modelos ORM de SQLAlchemy."""
-    pass
+try:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.orm import DeclarativeBase
 
+    class Base(DeclarativeBase):
+        """Clase base declarativa para los modelos ORM de SQLAlchemy."""
 
-# TODO 1: Crear el motor asíncrono `engine = create_async_engine(settings.DATABASE_URL_ASYNC, ...)`
-engine = None
+        pass
 
-# TODO 2: Crear la factoría de sesiones `AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, ...)`
-AsyncSessionLocal = None
+    try:
+        engine = create_async_engine(settings.DATABASE_URL_ASYNC, pool_pre_ping=True)
+        AsyncSessionLocal = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+    except (ImportError, ModuleNotFoundError):  # pragma: no cover - host sin driver asyncpg
+        engine = None
+        AsyncSessionLocal = None
+except ImportError:  # pragma: no cover - permite ejecutar pruebas unitarias en host sin sqlalchemy
+    AsyncSession = Any  # type: ignore
+
+    class Base:  # type: ignore
+        """Clase base sustitutiva cuando SQLAlchemy no está instalado."""
+
+        pass
+
+    engine = None
+    AsyncSessionLocal = None
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    TODO 3: Dependencia de FastAPI (`Depends(get_db)`) que abre una sesión asíncrona
+    Dependencia de FastAPI (`Depends(get_db)`) que abre una sesión asíncrona
     contra PostgreSQL/PostGIS y la cede (`yield session`) a cada endpoint.
     """
-    pass
+    if AsyncSessionLocal is None:
+        raise RuntimeError(
+            "La factoría de sesiones asíncronas no está disponible (requiere sqlalchemy y asyncpg)."
+        )
+    async with AsyncSessionLocal() as session:
+        yield session
