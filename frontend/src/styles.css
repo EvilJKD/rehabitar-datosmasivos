@@ -1,1 +1,118 @@
-/* You can add global styles to this file, and also import other style files */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap";
+@import "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200";
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-surface text-on-surface antialiased;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    font-feature-settings: "tnum" 1, "cv05" 1, "zero" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-container-lowest;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-outline-variant rounded-full;
+  }
+}
+
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply px-6 py-3 bg-primary-900 text-white rounded-lg font-label-semibold hover:bg-primary-800 transition;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-secondary-900 text-white rounded-lg font-label-semibold hover:bg-secondary-800 transition;
+  }
+
+  .btn-outline {
+    @apply px-6 py-3 border-2 border-primary-900 text-primary-900 rounded-lg font-label-semibold hover:bg-primary-50 transition;
+  }
+
+  /* Input Fields */
+  .input-base {
+    @apply px-4 py-2 border-2 border-surface-container rounded-lg font-body-sm placeholder-surface-600 focus:outline-none focus:border-primary-900 transition;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white rounded-lg shadow-elevation-sm border-2 border-surface-container p-md;
+  }
+
+  /* Badges */
+  .badge-verde {
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-favorable-100 text-favorable-700 rounded-full font-label-xs font-label-semibold;
+  }
+
+  .badge-ambar {
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-vulnerable-100 text-vulnerable-700 rounded-full font-label-xs font-label-semibold;
+  }
+
+  .badge-rojo {
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-high-risk-100 text-high-risk-700 rounded-full font-label-xs font-label-semibold;
+  }
+
+  .badge-pendiente {
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-pending-100 text-pending-700 rounded-full font-label-xs font-label-semibold;
+  }
+
+  /* Tables */
+  .table-base {
+    @apply w-full border-collapse;
+  }
+
+  .table-base thead {
+    @apply bg-surface-container-high border-b-2 border-surface-container;
+  }
+
+  .table-base th {
+    @apply px-4 py-3 text-left font-label-sm font-label-semibold text-surface-900;
+  }
+
+  .table-base td {
+    @apply px-4 py-3 text-label-sm text-surface-700 border-b border-surface-container;
+  }
+
+  .table-base tbody tr:hover {
+    @apply bg-surface-container-low transition;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-900 to-secondary-900 bg-clip-text text-transparent;
+  }
+
+  .shadow-elevation-sm {
+    @apply shadow-sm;
+  }
+
+  .shadow-elevation-md {
+    @apply shadow-md;
+  }
+
+  .shadow-elevation-lg {
+    @apply shadow-lg;
+  }
+}
+
+@import "app/app.css";

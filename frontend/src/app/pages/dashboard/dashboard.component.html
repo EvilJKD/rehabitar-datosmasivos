@@ -1,0 +1,123 @@
+<div class="min-h-screen bg-gradient-to-br from-surface-50 to-surface-100 p-xs sm:p-sm md:p-md lg:p-lg">
+  <!-- Header -->
+  <div class="mb-lg">
+    <h1 class="text-display-2xl font-heading-bold text-primary-900">
+      Dashboard de Riesgo Demográfico
+    </h1>
+    <p class="text-label-lg text-surface-600 mt-xs">
+      Sierra Norte de la Comunidad de Madrid
+    </p>
+  </div>
+
+  <!-- Loading state -->
+  <div *ngIf="isLoading" class="flex justify-center items-center min-h-96">
+    <div class="text-center">
+      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-100 mb-md">
+        <span class="material-symbols-outlined text-primary-700 text-4xl animate-spin">
+          sync
+        </span>
+      </div>
+      <p class="text-label-lg text-surface-600">Cargando datos...</p>
+    </div>
+  </div>
+
+  <!-- Error state -->
+  <div *ngIf="error && !isLoading" class="bg-error-50 border border-error-200 rounded-md p-md mb-lg">
+    <div class="flex items-start gap-md">
+      <span class="material-symbols-outlined text-error-600">warning</span>
+      <div>
+        <h3 class="text-label-md font-label-semibold text-error-900">Error</h3>
+        <p class="text-label-sm text-error-700">{{ error }}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <ng-container *ngIf="!isLoading && kpiData">
+    <!-- KPI Cards Section -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-sm md:gap-md mb-lg">
+      <!-- Total Analizados -->
+      <app-kpi-card
+        label="Municipios Analizados"
+        icon="domain"
+        [value]="kpiData.total_analizados.toString()"
+        subtitle="En la Sierra Norte"
+        status="default"
+        badge="Total"
+      />
+
+      <!-- Riesgo Alto -->
+      <app-kpi-card
+        label="Riesgo Alto"
+        icon="warning"
+        [value]="kpiData.riesgo_alto.toString()"
+        subtitle="Semáforo ROJO"
+        status="critical"
+        badge="ROJO"
+      />
+
+      <!-- Riesgo Medio -->
+      <app-kpi-card
+        label="Riesgo Medio"
+        icon="tune"
+        [value]="kpiData.riesgo_medio.toString()"
+        subtitle="Semáforo ÁMBAR"
+        status="warning"
+        badge="ÁMBAR"
+      />
+
+      <!-- Favorable -->
+      <app-kpi-card
+        label="Favorable"
+        icon="verified"
+        [value]="kpiData.favorable.toString()"
+        subtitle="Semáforo VERDE"
+        status="favorable"
+        badge="VERDE"
+      />
+
+      <!-- Pendiente -->
+      <app-kpi-card
+        label="Pendiente"
+        icon="hourglass_empty"
+        [value]="kpiData.pendientes.toString()"
+        subtitle="Por hidratación"
+        status="pending"
+        badge="PENDIENTE"
+      />
+    </div>
+
+    <!-- Map & Ranking Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-sm md:gap-md">
+      <!-- Map (2/3 width on desktop) -->
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow-elevation-sm overflow-hidden border border-surface-200">
+          <div class="p-md border-b border-surface-100">
+            <h2 class="text-headline-lg font-heading-semibold text-surface-900">
+              Mapa de Riesgo WLC
+            </h2>
+            <p class="text-label-sm text-surface-600 mt-xs">
+              Viabilidad territorial según Weighted Linear Combination
+            </p>
+          </div>
+          <app-territorio-map />
+        </div>
+      </div>
+
+      <!-- Ranking Table (1/3 width on desktop) -->
+      <div class="lg:col-span-1">
+        <div class="bg-white rounded-lg shadow-elevation-sm overflow-hidden border border-surface-200">
+          <div class="p-md border-b border-surface-100">
+            <h2 class="text-headline-lg font-heading-semibold text-surface-900">
+              Ranking Municipal
+            </h2>
+            <p class="text-label-sm text-surface-600 mt-xs">
+              Ordenado por viabilidad
+            </p>
+          </div>
+          <app-rango-municipal [municipios]="municipios" />
+        </div>
+      </div>
+    </div>
+  </ng-container>
+</div>

@@ -1,59 +1,91 @@
-# Frontend
+# Re-Habitar PoC - Frontend
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.3.0.
+Territorial intelligence dashboard for demographic risk analysis in Madrid's Sierra Norte region. Built with **Angular 22** + **Tailwind CSS v3** + **TypeScript**.
 
-## Development server
+Displays WLC (Weighted Linear Combination) viability scores, emergency healthcare accessibility, and intelligent public funding opportunities from BDNS/Reto Demográfico.
 
-To start a local development server, run:
-
-```bash
-ng serve
-```
-
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+## Quick Start
 
 ```bash
-ng generate component component-name
+npm start
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+Application runs at `http://localhost:4200/`
+
+## Project Structure
+
+```
+src/app/
+├── pages/                 # Route-based components
+│   ├── dashboard/        # 5 KPI cards + WLC map + municipality ranking
+│   ├── municipio-detail/ # Detailed municipality viability breakdown
+│   ├── convocatorias/    # Public funding catalog & filtering
+│   └── not-found/        # 404 page
+│
+├── shared/components/    # Reusable UI components
+│   ├── navbar/          # Fixed navigation bar
+│   ├── kpi-card/        # KPI metric cards
+│   ├── territorio-map/  # Interactive territory map
+│   └── rango-municipal/ # WLC ranking table
+│
+├── core/
+│   ├── services/        # MunicipioService (API client)
+│   └── models/          # TypeScript interfaces
+│
+└── app.*                # Root component & routing
+```
+
+## Architecture
+
+- **Standalone Components**: Modern Angular pattern (no NgModules)
+- **Change Detection**: OnPush strategy for performance
+- **Reactive**: RxJS Subjects & takeUntil for cleanup
+- **Styling**: Tailwind v3 + 43-color Sierra Norte design system
+- **State**: Local component state (service-backed where needed)
+
+## Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| **Dashboard** | 5 KPIs + WLC map + municipality ranking by viability score |
+| **Municipio Detail** | Full WLC breakdown (5 criteria), demographics, infrastructure |
+| **Convocatorias** | Searchable funding catalog filtered by applicability |
+| **KPI Card** | Metric display with status badges (favorable/warning/critical) |
+| **Rango Municipal** | Sortable, searchable table of municipalities ranked by WLC |
+
+## Data Models
+
+- **Municipio**: Core geographic unit with WLC scores, demographics, infrastructure
+- **WLCBreakdown**: 5-component viability assessment (road access, healthcare proximity, digital connectivity, water access, demographic inertia)
+- **Convocatoria**: Public funding opportunities with applicability rules (by municipality, population, region)
+- **KPISummary**: Dashboard aggregates (total analyzed, risk levels, pending)
+
+## Available Commands
 
 ```bash
-ng generate --help
+npm start        # Dev server + watch mode (port 4200)
+npm run build    # Production build → dist/
+npm test         # Unit tests (Vitest)
+ng generate component path/name  # Scaffold component
 ```
 
-## Building
+## Design System
 
-To build the project run:
+- **Colors**: Primary (Sierra blue), Secondary, Tertiary, Error, Surfaces (43 tokens)
+- **Typography**: Plus Jakarta Sans (headings) + Inter (body, tabular numbers)
+- **Spacing**: 8pt system (xs, sm, md, lg, xl, xl-2xl)
+- **Components**: Buttons, inputs, cards, badges, tables with consistent styling
+- **Icons**: Material Symbols (Outlined variant via CDN)
 
-```bash
-ng build
-```
+## Browser Support
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+- Chrome/Edge 90+
+- Firefox 88+
+- Safari 15+
 
-## Running unit tests
+## Dependencies
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+- **Angular 22.3.0** - Framework
+- **Tailwind CSS v3.4.1** - Styling
+- **TypeScript 5.6** - Type safety
+- **RxJS 7** - Reactive programming
