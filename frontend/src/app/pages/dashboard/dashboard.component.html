@@ -1,35 +1,85 @@
-<div class="min-h-screen bg-gradient-to-br from-surface-50 to-surface-100 p-xs sm:p-sm md:p-md lg:p-lg">
+<div
+  class="min-h-screen bg-gradient-to-br from-surface-50 to-surface-100 p-xs sm:p-sm md:p-md lg:p-lg"
+>
   <!-- Header -->
-  <div class="mb-lg">
-    <h1 class="text-display-2xl font-heading-bold text-primary-900">
-      Dashboard de Riesgo Demográfico
-    </h1>
-    <p class="text-label-lg text-surface-600 mt-xs">
-      Sierra Norte de la Comunidad de Madrid
-    </p>
-    <p *ngIf="health" class="text-label-sm text-surface-600">Sistema {{ health.status }} · {{ health.municipios_hidratados }} de {{ health.total_municipios }} municipios con datos · {{ health.database }}</p>
-    <p *ngIf="healthError" class="text-error-700">No se pudo consultar el estado del sistema.</p>
-    <div class="flex flex-wrap gap-2 mt-4">
-      <button class="btn-outline" [disabled]="isLoading" (click)="loadDashboardData()">Todos</button>
-      <button class="btn-outline" [disabled]="isLoading" (click)="loadDashboardData({ min_wlc: 75, requiere_fibra: true })">WLC ≥ 75 y fibra</button>
-      <button class="btn-outline" [disabled]="isLoading" (click)="loadDashboardData({ con_ayuda_abierta: true })">Con ayudas abiertas</button>
+  <div class="mb-lg pb-md border-b-2 border-surface-container">
+    <div class="flex flex-col gap-xs mb-md">
+      <h1 class="text-headline-md text-primary font-heading-bold">
+        Dashboard de Riesgo Demográfico
+      </h1>
+      <p class="text-label-md text-on-surface-variant">Sierra Norte de la Comunidad de Madrid</p>
+    </div>
+
+    <!-- Health Status Card -->
+    <div class="flex flex-col gap-sm mb-md">
+      <div
+        *ngIf="health"
+        class="flex items-center gap-md p-sm bg-surface-container rounded-lg border border-surface-container-high"
+      >
+        <span class="material-symbols-outlined text-favorable text-lg">check_circle</span>
+        <p class="text-label-sm text-on-surface">
+          <span class="font-semibold">Sistema operativo</span> ·
+          {{ health.municipios_hidratados }}/{{ health.total_municipios }} municipios ·
+          <span class="text-on-surface-variant">{{ health.database }}</span>
+        </p>
+      </div>
+      <div
+        *ngIf="healthError"
+        class="flex items-center gap-md p-sm bg-error-50 border border-error-200 rounded-lg"
+      >
+        <span class="material-symbols-outlined text-error text-lg">error</span>
+        <p class="text-label-sm text-error font-semibold">
+          No se pudo consultar el estado del sistema.
+        </p>
+      </div>
+    </div>
+
+    <!-- Filter Buttons -->
+    <div class="flex flex-wrap gap-md">
+      <button
+        [ngClass]="activeFilter === 'all' ? 'btn-primary' : 'btn-outline'"
+        [disabled]="isLoading"
+        (click)="setFilter('all'); loadDashboardData()"
+      >
+        <span class="material-symbols-outlined text-sm">filter_list</span>
+        Todos
+      </button>
+      <button
+        [ngClass]="activeFilter === 'wlc_fibra' ? 'btn-primary' : 'btn-outline'"
+        [disabled]="isLoading"
+        (click)="setFilter('wlc_fibra'); loadDashboardData({ min_wlc: 75, requiere_fibra: true })"
+      >
+        <span class="material-symbols-outlined text-sm">signal_cellular_alt</span>
+        WLC ≥ 75 y fibra
+      </button>
+      <button
+        [ngClass]="activeFilter === 'ayudas' ? 'btn-primary' : 'btn-outline'"
+        [disabled]="isLoading"
+        (click)="setFilter('ayudas'); loadDashboardData({ con_ayuda_abierta: true })"
+      >
+        <span class="material-symbols-outlined text-sm">attach_money</span>
+        Con ayudas abiertas
+      </button>
     </div>
   </div>
 
   <!-- Loading state -->
   <div *ngIf="isLoading" class="flex justify-center items-center min-h-96">
     <div class="text-center">
-      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-100 mb-md">
-        <span class="material-symbols-outlined text-primary-700 text-4xl animate-spin">
-          sync
-        </span>
+      <div
+        class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-100 mb-md"
+      >
+        <span class="material-symbols-outlined text-primary-700 text-4xl animate-spin"> sync </span>
       </div>
       <p class="text-label-lg text-surface-600">Cargando datos...</p>
     </div>
   </div>
 
   <!-- Error state -->
-  <div *ngIf="error && !isLoading" class="bg-error-50 border border-error-200 rounded-md p-md mb-lg">
+  <div
+    *ngIf="error && !isLoading"
+    class="bg-error-50 border border-error-200 rounded-md p-md mb-lg"
+  >
     <div class="flex items-start gap-md">
       <span class="material-symbols-outlined text-error-600">warning</span>
       <div>
@@ -98,9 +148,11 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-sm md:gap-md">
       <!-- Map (2/3 width on desktop) -->
       <div class="lg:col-span-2">
-        <div class="bg-white rounded-lg shadow-elevation-sm overflow-hidden border border-surface-200">
+        <div
+          class="bg-white rounded-lg shadow-elevation-sm overflow-hidden border border-surface-200"
+        >
           <div class="p-md border-b border-surface-100">
-            <h2 class="text-headline-lg font-heading-semibold text-surface-900">
+            <h2 class="text-headline-md font-heading-semibold text-surface-900">
               Mapa de Riesgo WLC
             </h2>
             <p class="text-label-sm text-surface-600 mt-xs">
@@ -113,14 +165,14 @@
 
       <!-- Ranking Table (1/3 width on desktop) -->
       <div class="lg:col-span-1">
-        <div class="bg-white rounded-lg shadow-elevation-sm overflow-hidden border border-surface-200">
+        <div
+          class="bg-white rounded-lg shadow-elevation-sm overflow-hidden border border-surface-200"
+        >
           <div class="p-md border-b border-surface-100">
-            <h2 class="text-headline-lg font-heading-semibold text-surface-900">
+            <h2 class="text-headline-md font-heading-semibold text-surface-900">
               Ranking Municipal
             </h2>
-            <p class="text-label-sm text-surface-600 mt-xs">
-              Ordenado por viabilidad
-            </p>
+            <p class="text-label-sm text-surface-600 mt-xs">Ordenado por viabilidad</p>
           </div>
           <app-rango-municipal [municipios]="municipios" />
         </div>

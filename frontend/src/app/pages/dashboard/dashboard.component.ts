@@ -39,6 +39,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   error: string | null = null;
   health: Health | null = null;
   healthError = false;
+  activeFilter: 'all' | 'wlc_fibra' | 'ayudas' = 'all';
 
   private destroy$ = new Subject<void>();
 
@@ -84,6 +85,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.cdr.markForCheck();
         }
       });
+  }
+
+  setFilter(filter: 'all' | 'wlc_fibra' | 'ayudas'): void {
+    this.activeFilter = filter;
+    this.cdr.markForCheck();
   }
 
   private calculateKPIs(municipios: Municipio[]): KPISummary {

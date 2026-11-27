@@ -1,5 +1,5 @@
-@import "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap";
-@import "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200";
+@import 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap';
+@import 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200';
 
 @tailwind base;
 @tailwind components;
@@ -11,12 +11,28 @@
   }
   body {
     @apply bg-surface text-on-surface antialiased;
-    font-family: "Inter", system-ui, -apple-system, sans-serif;
-    font-feature-settings: "tnum" 1, "cv05" 1, "zero" 1;
+    font-family:
+      'Inter',
+      system-ui,
+      -apple-system,
+      sans-serif;
+    font-feature-settings:
+      'tnum' 1,
+      'cv05' 1,
+      'zero' 1;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family:
+      'Plus Jakarta Sans',
+      system-ui,
+      -apple-system,
+      sans-serif;
   }
 
   ::-webkit-scrollbar {
@@ -54,24 +70,24 @@
 
   /* Cards */
   .card {
-    @apply bg-white rounded-lg shadow-sm border-2 border-surface-container p-space-md;
+    @apply bg-white rounded-lg shadow-sm border-2 border-surface-container p-md;
   }
 
   /* Badges */
   .badge-verde {
-    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-secondary-container text-on-secondary-container rounded-full font-label-sm font-semibold;
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-secondary-container text-on-secondary-container rounded-full font-label-sm font-semibold;
   }
 
   .badge-ambar {
-    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-amber-100 text-amber-900 rounded-full font-label-sm font-semibold;
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-amber-100 text-amber-900 rounded-full font-label-sm font-semibold;
   }
 
   .badge-rojo {
-    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-error-container text-on-error-container rounded-full font-label-sm font-semibold;
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-error-container text-on-error-container rounded-full font-label-sm font-semibold;
   }
 
   .badge-pendiente {
-    @apply inline-flex items-center gap-space-xs px-space-sm py-space-xs bg-surface-container text-on-surface-variant rounded-full font-label-sm font-semibold;
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-surface-container text-on-surface-variant rounded-full font-label-sm font-semibold;
   }
 
   /* Tables */

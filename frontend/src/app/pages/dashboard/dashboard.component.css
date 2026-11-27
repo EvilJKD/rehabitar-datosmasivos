@@ -22,7 +22,7 @@
 /* Responsive adjustments */
 @media (max-width: 768px) {
   :host ::ng-deep .grid {
-    gap: var(--space-xs);
+    gap: var(--xs);
   }
 
   :host ::ng-deep h1 {
