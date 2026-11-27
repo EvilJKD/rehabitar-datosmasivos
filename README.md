@@ -15,9 +15,9 @@ docker compose up --build
 ### Flujo automático de arranque:
 1. **`db` (`postgis/postgis:15-3.4-alpine`)**: Levanta PostgreSQL con la extensión `postgis`, inicializa el esquema DDL (`db/schema.sql`) con índices espaciales **GiST** (`geom geometry(Point, 4326)`) y expone un `healthcheck` (`pg_isready`).
 2. **`etl_runner` (Contenedor efímero Python)**: Espera a que `db` esté sano (`service_healthy`) y ejecuta en vivo `python run_all.py`, realizando la carga semilla inicial de los 4 pipelines (`P1 -> P2 -> P3 -> P4`) con logs detallados en consola directamente desde las APIs y fuentes públicas oficiales.
-3. **`app` (FastAPI + Uvicorn + Frontend)**: Espera a que `etl_runner` finalice con éxito (`service_completed_successfully`) y publica tanto la API REST como la aplicación web interactiva en:
-   - **Interfaz Web Interactiva (Mapa + Dashboard)**: [http://localhost:8000](http://localhost:8000)
+3. **`app` (FastAPI + Uvicorn)**: Espera a que `etl_runner` finalice con éxito (`service_completed_successfully`) y publica la API REST:
    - **Documentación Interactiva OpenAPI (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
+4. **`frontend` (Angular + Nginx)**: Publica la aplicación web en [http://localhost:4200](http://localhost:4200) y redirige las solicitudes `/api` al backend.
 
 ---
 

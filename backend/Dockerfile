@@ -1,11 +1,11 @@
 # =============================================================================
-# Dockerfile para Backend FastAPI + Ingesta Hibrida + Frontend Web (LISTO PARA USAR)
+# Dockerfile para Backend FastAPI + Ingesta Hibrida (LISTO PARA USAR)
 # Nota: Se construye desde el contexto raiz (.) en docker-compose.yml
 # =============================================================================
 FROM python:3.11-slim
 
 LABEL maintainer="Equipo Re-Habitar - Master en Informatica"
-LABEL description="Servidor FastAPI con Ingesta Hibrida (Batch + Bajo Demanda), Motor WLC y Frontend"
+LABEL description="Servidor FastAPI con Ingesta Hibrida (Batch + Bajo Demanda) y Motor WLC"
 
 WORKDIR /app/backend
 
@@ -19,10 +19,9 @@ COPY etl/requirements.txt /tmp/etl_requirements.txt
 COPY backend/requirements.txt /tmp/backend_requirements.txt
 RUN pip install --no-cache-dir -r /tmp/etl_requirements.txt -r /tmp/backend_requirements.txt
 
-# Copia de modulos ETL (incluyendo data/raw para fallback bajo demanda), Backend y Frontend
+# Copia de modulos ETL (incluyendo data/raw para fallback bajo demanda) y Backend
 COPY etl/ /app/etl/
 COPY backend/ /app/backend/
-COPY frontend/ /app/frontend/
 
 ENV PYTHONPATH=/app/backend:/app/etl
 ENV PYTHONUNBUFFERED=1

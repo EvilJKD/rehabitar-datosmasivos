@@ -1,6 +1,6 @@
 # Backend API (`backend/`)
 
-Esta carpeta contiene el servidor **FastAPI** que expone la API REST del proyecto, coordina la hidratación bajo demanda en PostgreSQL/PostGIS, calcula rutas en tiempo real con CartoCiudad, ejecuta en memoria el motor de viabilidad WLC y sirve los archivos estáticos de `frontend/`.
+Esta carpeta contiene el servidor **FastAPI** que expone la API REST del proyecto, coordina la hidratación bajo demanda en PostgreSQL/PostGIS, calcula rutas en tiempo real con CartoCiudad y ejecuta en memoria el motor de viabilidad WLC. El frontend Angular se sirve en un contenedor separado.
 
 ## Archivos y submódulos principales
 

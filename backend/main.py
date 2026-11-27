@@ -639,11 +639,16 @@ async def list_centros_sanitarios(
     )
 
 
-# Montaje de archivos estáticos del frontend (`frontend/`)
+# Montaje opcional de archivos estáticos del frontend anterior (`frontend/`)
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", "frontend"))
 
-if _HAS_FASTAPI and os.path.isdir(FRONTEND_DIR):
+if (
+    _HAS_FASTAPI
+    and os.path.isfile(os.path.join(FRONTEND_DIR, "index.html"))
+    and os.path.isdir(os.path.join(FRONTEND_DIR, "css"))
+    and os.path.isdir(os.path.join(FRONTEND_DIR, "js"))
+):
     app.mount("/css", StaticFiles(directory=os.path.join(FRONTEND_DIR, "css")), name="css")
     app.mount("/js", StaticFiles(directory=os.path.join(FRONTEND_DIR, "js")), name="js")
 

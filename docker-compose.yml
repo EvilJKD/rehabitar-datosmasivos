@@ -59,7 +59,7 @@ services:
       - rehabitar_net
 
   # ---------------------------------------------------------------------------
-  # 3. Aplicación Backend FastAPI + Ingesta Bajo Demanda + Frontend (Puerto 8000)
+  # 3. Aplicación Backend FastAPI + Ingesta Bajo Demanda (Puerto 8000)
   # ---------------------------------------------------------------------------
   app:
     build:
@@ -88,6 +88,22 @@ services:
         condition: service_healthy
       etl_runner:
         condition: service_completed_successfully
+    networks:
+      - rehabitar_net
+
+  # ---------------------------------------------------------------------------
+  # 4. Frontend Angular y proxy hacia la API (Puerto 4200)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rehabitar_frontend
+    restart: unless-stopped
+    ports:
+      - "4200:80"
+    depends_on:
+      - app
     networks:
       - rehabitar_net
 

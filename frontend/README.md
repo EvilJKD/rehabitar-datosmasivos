@@ -12,6 +12,10 @@ npm start
 
 Application runs at `http://localhost:4200/`
 
+To run the production build with the backend using Docker, execute
+`docker compose up --build` from the repository root and open
+`http://localhost:4200/`. Nginx proxies `/api/` requests to the `app` service.
+
 ### API y datos de prueba
 
 En desarrollo, `/api` se redirige a `http://localhost:8000` mediante
