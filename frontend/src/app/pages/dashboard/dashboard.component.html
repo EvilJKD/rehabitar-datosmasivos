@@ -108,9 +108,9 @@
         label="Riesgo Alto"
         icon="warning"
         [value]="kpiData.riesgo_alto.toString()"
-        subtitle="Semáforo ROJO"
+        subtitle="Riesgo alto"
         status="critical"
-        badge="ROJO"
+        [badge]="'ROJO' | semaforoLabel"
       />
 
       <!-- Riesgo Medio -->
@@ -118,9 +118,9 @@
         label="Riesgo Medio"
         icon="tune"
         [value]="kpiData.riesgo_medio.toString()"
-        subtitle="Semáforo ÁMBAR"
+        subtitle="Riesgo medio"
         status="warning"
-        badge="ÁMBAR"
+        [badge]="'AMBAR' | semaforoLabel"
       />
 
       <!-- Favorable -->
@@ -128,9 +128,9 @@
         label="Favorable"
         icon="verified"
         [value]="kpiData.favorable.toString()"
-        subtitle="Semáforo VERDE"
+        subtitle="Viabilidad favorable"
         status="favorable"
-        badge="VERDE"
+        [badge]="'VERDE' | semaforoLabel"
       />
 
       <!-- Pendiente -->
@@ -140,7 +140,7 @@
         [value]="kpiData.pendientes.toString()"
         subtitle="Por hidratación"
         status="pending"
-        badge="PENDIENTE"
+        [badge]="'PENDIENTE' | semaforoLabel"
       />
     </div>
 

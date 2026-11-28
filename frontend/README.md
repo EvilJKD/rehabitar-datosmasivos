@@ -16,6 +16,25 @@ To run the production build with the backend using Docker, execute
 `docker compose up --build` from the repository root and open
 `http://localhost:4200/`. Nginx proxies `/api/` requests to the `app` service.
 
+For frontend development with automatic rebuilds and reloads, stop the
+production frontend if it is using port 4200, then run from the repository root:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build frontend-dev
+```
+
+Open `http://localhost:4200/`. Source changes are watched via polling, and
+`proxy.docker.json` forwards `/api/` requests to the `app` container. Angular
+supports hot replacement for styles and templates; other changes may reload
+the page. The production Nginx service is unchanged.
+
+The development container stores dependencies in a Docker volume. After changing
+`package-lock.json`, stop the development service and update that volume with:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps frontend-dev npm ci
+```
+
 ### API y datos de prueba
 
 En desarrollo, `/api` se redirige a `http://localhost:8000` mediante

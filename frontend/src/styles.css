@@ -56,7 +56,7 @@
   }
 
   .btn-secondary {
-    @apply px-6 py-3 bg-secondary text-white rounded-lg font-semibold hover:bg-secondary-container transition;
+    @apply px-6 py-3 bg-secondary text-white rounded-lg font-semibold hover:bg-primary-container transition;
   }
 
   .btn-outline {
@@ -75,7 +75,7 @@
 
   /* Badges */
   .badge-verde {
-    @apply inline-flex items-center gap-xs px-sm py-xs bg-secondary-container text-on-secondary-container rounded-full font-label-sm font-semibold;
+    @apply inline-flex items-center gap-xs px-sm py-xs bg-green-100 text-green-900 rounded-full font-label-sm font-semibold;
   }
 
   .badge-ambar {

@@ -1,8 +1,10 @@
-FROM node:24-alpine AS build
+FROM node:24-alpine AS dependencies
 
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci
+
+FROM dependencies AS build
 COPY . .
 RUN npm run build
 

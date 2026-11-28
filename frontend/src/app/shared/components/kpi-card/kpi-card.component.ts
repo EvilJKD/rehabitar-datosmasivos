@@ -44,7 +44,7 @@ export class KpiCardComponent {
       default: 'text-outline',
       critical: 'text-error',
       warning: 'text-amber-700',
-      favorable: 'text-secondary',
+      favorable: 'text-green-700',
       pending: 'text-outline',
     };
     return colors[this.status] || colors['default'];
@@ -68,7 +68,7 @@ export class KpiCardComponent {
       default: 'bg-surface-container text-on-surface-variant',
       critical: 'bg-error-container/60 text-on-error-container',
       warning: 'bg-amber-100 text-amber-900',
-      favorable: 'bg-secondary-container text-on-secondary-container',
+      favorable: 'bg-green-100 text-green-900',
       pending: 'bg-surface-container text-on-surface-variant',
     };
     return `${baseClasses} ${statusClasses[this.status] || statusClasses['default']}`;
@@ -79,7 +79,7 @@ export class KpiCardComponent {
       default: 'bg-outline',
       critical: 'bg-error',
       warning: 'bg-amber-600',
-      favorable: 'bg-secondary',
+      favorable: 'bg-green-700',
       pending: 'bg-outline',
     };
     return `w-1.5 h-1.5 rounded-full ${dotColors[this.status] || dotColors['default']}`;

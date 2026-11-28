@@ -5,56 +5,56 @@ module.exports = {
     extend: {
       colors: {
         // Surfaces
-        surface: '#f7faf5',
-        'surface-dim': '#d8dbd6',
-        'surface-bright': '#f7faf5',
+        surface: '#f7f9fc',
+        'surface-dim': '#d8dfe8',
+        'surface-bright': '#f7f9fc',
         'surface-container-lowest': '#ffffff',
-        'surface-container-low': '#f1f4ef',
-        'surface-container': '#ecefea',
-        'surface-container-high': '#e6e9e4',
-        'surface-container-highest': '#e0e3df',
+        'surface-container-low': '#f0f4f9',
+        'surface-container': '#e9eff6',
+        'surface-container-high': '#e2eaf3',
+        'surface-container-highest': '#dbe4ef',
 
         // On Surface
-        'on-surface': '#191c1a',
-        'on-surface-variant': '#424844',
-        'inverse-surface': '#2d312e',
-        'inverse-on-surface': '#eff2ed',
+        'on-surface': '#191c20',
+        'on-surface-variant': '#424b56',
+        'inverse-surface': '#2e3136',
+        'inverse-on-surface': '#eff1f5',
 
         // Outlines
-        outline: '#737974',
-        'outline-variant': '#c2c8c2',
-        'surface-tint': '#4d6357',
+        outline: '#737d89',
+        'outline-variant': '#c3cbd5',
+        'surface-tint': '#1f62a9',
 
-        // Primary (Pine)
-        primary: '#23382d',
+        // Primary (Blue)
+        primary: '#1f62a9',
         'on-primary': '#ffffff',
-        'primary-container': '#394f43',
-        'on-primary-container': '#a7c0b1',
-        'inverse-primary': '#b4ccbd',
-        'primary-fixed': '#cfe9d8',
-        'primary-fixed-dim': '#b4ccbd',
-        'on-primary-fixed': '#0a2016',
-        'on-primary-fixed-variant': '#364b40',
+        'primary-container': '#174a80',
+        'on-primary-container': '#d4e5ff',
+        'inverse-primary': '#a5c9f8',
+        'primary-fixed': '#d4e5ff',
+        'primary-fixed-dim': '#a5c9f8',
+        'on-primary-fixed': '#001c38',
+        'on-primary-fixed-variant': '#174a80',
 
-        // Secondary (Sage)
-        secondary: '#4d6355',
+        // Secondary (Slate Blue)
+        secondary: '#4b637d',
         'on-secondary': '#ffffff',
-        'secondary-container': '#cde6d4',
-        'on-secondary-container': '#51685a',
-        'secondary-fixed': '#d0e9d7',
-        'secondary-fixed-dim': '#b4ccbb',
-        'on-secondary-fixed': '#0a2015',
-        'on-secondary-fixed-variant': '#364c3e',
+        'secondary-container': '#d1e4f8',
+        'on-secondary-container': '#17324a',
+        'secondary-fixed': '#d1e4f8',
+        'secondary-fixed-dim': '#b5c8dc',
+        'on-secondary-fixed': '#0c1e30',
+        'on-secondary-fixed-variant': '#344b62',
 
-        // Tertiary (Mountain Herb)
-        tertiary: '#183b25',
+        // Tertiary (Deep Cyan)
+        tertiary: '#285f73',
         'on-tertiary': '#ffffff',
-        'tertiary-container': '#2f523a',
-        'on-tertiary-container': '#9dc4a6',
-        'tertiary-fixed': '#c4eccc',
-        'tertiary-fixed-dim': '#a9d0b1',
-        'on-tertiary-fixed': '#00210e',
-        'on-tertiary-fixed-variant': '#2b4e37',
+        'tertiary-container': '#164d61',
+        'on-tertiary-container': '#c2eafa',
+        'tertiary-fixed': '#c2eafa',
+        'tertiary-fixed-dim': '#a7cddd',
+        'on-tertiary-fixed': '#001f2b',
+        'on-tertiary-fixed-variant': '#164d61',
 
         // Error
         error: '#ba1a1a',
@@ -63,8 +63,8 @@ module.exports = {
         'on-error-container': '#93000a',
 
         // Background
-        background: '#f7faf5',
-        'on-background': '#191c1a',
+        background: '#f7f9fc',
+        'on-background': '#191c20',
 
         // Semaphore Colors
         favorable: '#72977b',

@@ -8,26 +8,20 @@ import { RouterModule } from '@angular/router';
   imports: [CommonModule, RouterModule],
   template: `
     <header
-      class="fixed top-0 left-0 right-0 w-full z-50 bg-surface-container-lowest border-b border-outline-variant/60 shadow-[0_1px_8px_rgba(0,0,0,0.02)]"
+      class="fixed top-0 left-0 right-0 w-full z-[1100] bg-surface-container-lowest border-b border-outline-variant/60 shadow-[0_1px_8px_rgba(0,0,0,0.02)]"
     >
       <div
-        class="h-16 w-full px-margin-desktop flex items-center justify-between p-sm gap-gutter-desktop"
+        class="h-16 w-full px-margin-desktop flex items-center justify-between px-3 py-2 gap-gutter-desktop"
       >
-        <!-- Logo -->
-        <div class="flex items-center gap-md shrink-0">
-          <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-            <span class="text-on-primary font-bold">SN</span>
-          </div>
-          <div class="flex flex-col">
-            <span class="font-headline-sm text-headline-sm text-on-surface leading-tight"
-              >Sierra Norte</span
-            >
-            <span
-              class="font-label-sm text-label-sm text-outline tracking-wider uppercase leading-none"
-              >Inteligencia Territorial</span
-            >
-          </div>
-        </div>
+        <a routerLink="/dashboard" class="flex flex-col shrink-0  ml-2">
+          <span class="font-headline-sm text-headline-md text-on-surface leading-tight"
+            >Rehabitar</span
+          >
+          <span
+            class="font-label-sm text-label-sm text-outline tracking-wider uppercase leading-none"
+            >Sierra Norte</span
+          >
+        </a>
 
         <!-- Navigation -->
         <nav class="flex items-center gap-xs">
@@ -42,7 +36,7 @@ import { RouterModule } from '@angular/router';
                 : 'font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'
             "
           >
-            Inicio
+            Municipios
           </a>
           <a
             routerLink="/convocatorias"

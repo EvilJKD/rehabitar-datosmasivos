@@ -7,6 +7,7 @@ import { Municipio, KPISummary, Health } from '../../core/models/municipio.model
 import { KpiCardComponent } from '../../shared/components/kpi-card/kpi-card.component';
 import { TerritorioMapComponent } from '../../shared/components/territorio-map/territorio-map.component';
 import { RangoMunicipalComponent } from '../../shared/components/rango-municipal/rango-municipal.component';
+import { SemaforoLabelPipe } from '../../shared/pipes/semaforo-label.pipe';
 
 /**
  * DashboardComponent - Main landing page
@@ -26,7 +27,8 @@ import { RangoMunicipalComponent } from '../../shared/components/rango-municipal
     CommonModule,
     KpiCardComponent,
     TerritorioMapComponent,
-    RangoMunicipalComponent
+    RangoMunicipalComponent,
+    SemaforoLabelPipe
   ],
   templateUrl: './dashboard.component.html',
   styleUrls: ['./dashboard.component.css'],
