@@ -299,6 +299,76 @@ class TestFrontendAPIContracts(unittest.IsolatedAsyncioTestCase):
             mock_db, solo_urgencias=True, municipio_nombre="Buitrago", force_refresh=True
         )
 
+    async def test_trigger_municipio_ingestion_and_demografia_happy_path_contract(self):
+        mock_db = AsyncMock()
+        sentinel_detail = MagicMock(name="MunicipioDetailSchema")
+        with patch.object(
+            main, "get_municipio_detail", AsyncMock(return_value=sentinel_detail)
+        ) as m_detail:
+            result = await main.trigger_municipio_ingestion("28078", db=mock_db)
+
+        self.assertIs(result, sentinel_detail)
+        m_detail.assert_awaited_once_with(
+            codigo_ine="28078",
+            force_refresh=True,
+            w_demo=None,
+            w_health=None,
+            w_grants=None,
+            w_infra=None,
+            db=mock_db,
+        )
+
+        serie_payload = {
+            "codigo_ine": "28078",
+            "nombre": "Madarcos",
+            "poblacion_inicial_10a": 51,
+            "poblacion_actual": 47,
+            "variacion_10a_pct": -7.84,
+            "cobertura_fibra_pct": 100.0,
+            "distancia_urgencias_km": 7.73,
+            "num_ayudas_abiertas": 2,
+            "serie_anual": [
+                {
+                    "anio": 2015,
+                    "poblacion": 51,
+                    "poblacion_mayor_65": None,
+                    "poblacion_menor_15": None,
+                    "tasa_envejecimiento": None,
+                },
+                {
+                    "anio": 2025,
+                    "poblacion": 47,
+                    "poblacion_mayor_65": 18,
+                    "poblacion_menor_15": 4,
+                    "tasa_envejecimiento": 38.3,
+                },
+            ],
+        }
+        with patch.object(
+            main, "ensure_municipio_hydrated", AsyncMock(return_value="CACHE_POSTGRESQL")
+        ), patch.object(
+            main,
+            "get_municipio_by_ine",
+            AsyncMock(return_value={"codigo_ine": "28078", "cobertura_fibra_pct": 100.0}),
+        ), patch.object(
+            main,
+            "get_nearest_health_centers_for_municipio",
+            AsyncMock(return_value={"urgencias": {"distancia_euclidea_km": 7.73}, "consultorio": None}),
+        ), patch.object(
+            main, "get_num_ayudas_abiertas", AsyncMock(return_value=2)
+        ), patch.object(
+            main, "get_demografia_serie_by_municipio", AsyncMock(return_value=serie_payload)
+        ):
+            demografia = await main.get_municipio_demografia("28078", db=mock_db)
+
+        self.assertEqual(demografia.codigo_ine, "28078")
+        self.assertEqual(demografia.poblacion_actual, 47)
+        self.assertEqual(demografia.cobertura_fibra_pct, 100.0)
+        self.assertEqual(demografia.distancia_urgencias_km, 7.73)
+        self.assertEqual(demografia.num_ayudas_abiertas, 2)
+        self.assertEqual(len(demografia.serie_anual), 2)
+        self.assertEqual(demografia.serie_anual[1].tasa_envejecimiento, 38.3)
+
 
 class TestAllSourcesUseHTTPAPIsOnly(unittest.TestCase):
     def test_all_sources_use_http_apis_without_local_text_files(self):

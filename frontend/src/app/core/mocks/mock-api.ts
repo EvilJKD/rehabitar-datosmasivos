@@ -12,7 +12,7 @@ const wlc: WLCBreakdown = {
 
 const municipios: Municipio[] = [
   { codigo_ine: '28027', nombre: 'Buitrago del Lozoya', provincia: 'Madrid', comarca: 'Sierra Norte', latitud: 40.9909, longitud: -3.6336, hidratado: true, poblacion_actual: 2000, variacion_10a_pct: 4.2, cobertura_fibra_pct: 85, num_ayudas_abiertas: 1, wlc },
-  { codigo_ine: '28080', nombre: 'Madarcos', provincia: 'Madrid', comarca: 'Sierra Norte', latitud: 41.046, longitud: -3.579, hidratado: false, poblacion_actual: null, variacion_10a_pct: null, cobertura_fibra_pct: null, num_ayudas_abiertas: 0, wlc: null }
+  { codigo_ine: '28078', nombre: 'Madarcos', provincia: 'Madrid', comarca: 'Sierra Norte', latitud: 41.0487, longitud: -3.5828, hidratado: false, poblacion_actual: null, variacion_10a_pct: null, cobertura_fibra_pct: null, num_ayudas_abiertas: 0, wlc: null }
 ];
 
 const centro: CentroSanitario = {

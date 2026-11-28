@@ -1,4 +1,8 @@
 services:
+  frontend:
+    profiles:
+      - disabled
+
   frontend-dev:
     build:
       context: ./frontend

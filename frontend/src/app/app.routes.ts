@@ -1,12 +1,28 @@
 import { Routes } from '@angular/router';
-import { DashboardComponent } from './pages/dashboard/dashboard.component';
-import { MunicipioDetailComponent } from './pages/municipio-detail/municipio-detail.component';
-import { ConvocatoriasComponent } from './pages/convocatorias/convocatorias.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: '/dashboard', pathMatch: 'full' },
-  { path: 'dashboard', component: DashboardComponent },
-  { path: 'municipio/:codigo_ine', component: MunicipioDetailComponent },
-  { path: 'convocatorias', component: ConvocatoriasComponent },
+  {
+    path: 'dashboard',
+    loadComponent: () =>
+      import('./pages/dashboard/dashboard.component').then((m) => m.DashboardComponent),
+  },
+  {
+    path: 'analitica',
+    loadComponent: () =>
+      import('./pages/analitica/analitica.component').then((m) => m.AnaliticaComponent),
+  },
+  {
+    path: 'municipio/:codigo_ine',
+    loadComponent: () =>
+      import('./pages/municipio-detail/municipio-detail.component').then(
+        (m) => m.MunicipioDetailComponent,
+      ),
+  },
+  {
+    path: 'convocatorias',
+    loadComponent: () =>
+      import('./pages/convocatorias/convocatorias.component').then((m) => m.ConvocatoriasComponent),
+  },
   { path: '**', redirectTo: '/dashboard' },
 ];

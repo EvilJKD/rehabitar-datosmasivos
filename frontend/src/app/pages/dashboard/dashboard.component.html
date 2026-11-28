@@ -60,6 +60,56 @@
         <span class="material-symbols-outlined text-sm">attach_money</span>
         Con ayudas abiertas
       </button>
+      <button
+        type="button"
+        [ngClass]="showWeights || customWeightsActive ? 'btn-primary' : 'btn-outline'"
+        (click)="showWeights = !showWeights"
+      >
+        <span class="material-symbols-outlined text-sm">tune</span>
+        Pesos WLC
+      </button>
+    </div>
+
+    <!-- Custom WLC Weights Panel -->
+    <div
+      *ngIf="showWeights"
+      class="mt-md rounded-lg border border-surface-container-high bg-white p-md shadow-sm"
+    >
+      <div class="mb-sm flex flex-wrap items-center justify-between gap-sm">
+        <p class="text-label-md font-semibold text-on-surface">
+          Ajustar prioridades del Índice de Viabilidad WLC
+        </p>
+        <div class="flex gap-sm">
+          <button type="button" class="btn-outline !px-3 !py-1.5 text-label-sm" (click)="resetWeights()">
+            Restablecer
+          </button>
+          <button type="button" class="btn-primary !px-3 !py-1.5 text-label-sm" (click)="applyWeights()">
+            Aplicar pesos
+          </button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 gap-md sm:grid-cols-2 lg:grid-cols-5 text-label-sm">
+        <label class="flex flex-col gap-1">
+          <span>Carretera: <strong>{{ weights.w_carretera | number: '1.2-2' }}</strong></span>
+          <input type="range" min="0" max="1" step="0.05" [(ngModel)]="weights.w_carretera" class="accent-primary" />
+        </label>
+        <label class="flex flex-col gap-1">
+          <span>Sanidad: <strong>{{ weights.w_sanidad | number: '1.2-2' }}</strong></span>
+          <input type="range" min="0" max="1" step="0.05" [(ngModel)]="weights.w_sanidad" class="accent-primary" />
+        </label>
+        <label class="flex flex-col gap-1">
+          <span>Conectividad: <strong>{{ weights.w_conectividad | number: '1.2-2' }}</strong></span>
+          <input type="range" min="0" max="1" step="0.05" [(ngModel)]="weights.w_conectividad" class="accent-primary" />
+        </label>
+        <label class="flex flex-col gap-1">
+          <span>Agua: <strong>{{ weights.w_hidrico | number: '1.2-2' }}</strong></span>
+          <input type="range" min="0" max="1" step="0.05" [(ngModel)]="weights.w_hidrico" class="accent-primary" />
+        </label>
+        <label class="flex flex-col gap-1">
+          <span>Demografía: <strong>{{ weights.w_demografia | number: '1.2-2' }}</strong></span>
+          <input type="range" min="0" max="1" step="0.05" [(ngModel)]="weights.w_demografia" class="accent-primary" />
+        </label>
+      </div>
     </div>
   </div>
 

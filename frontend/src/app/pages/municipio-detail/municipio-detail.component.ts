@@ -1,8 +1,9 @@
-import { ChangeDetectorRef, Component, DestroyRef, inject, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, DestroyRef, ElementRef, inject, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, EMPTY, switchMap } from 'rxjs';
+import Chart from 'chart.js/auto';
 import { MunicipioService } from '../../core/services/municipio.service';
 import { Demografia, MunicipioDetail } from '../../core/models/municipio.model';
 import { RutaSanitariaComponent } from '../../shared/components/ruta-sanitaria/ruta-sanitaria.component';
@@ -176,16 +177,33 @@ import { SemaforoLabelPipe } from '../../shared/pipes/semaforo-label.pipe';
               Ayudas disponibles ({{ m.convocatorias.length }})
             </h2>
             <ul class="space-y-3 text-body-md text-on-surface-variant">
-              <li *ngFor="let conv of m.convocatorias">
-                {{ conv.descripcion }}
-                <a
-                  *ngIf="conv.url_bases"
-                  [href]="conv.url_bases"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary underline"
-                  >Ver bases</a
-                >
+              <li
+                *ngFor="let conv of m.convocatorias"
+                class="rounded-lg bg-surface-container-low p-3"
+              >
+                <p class="font-semibold text-on-surface">{{ conv.descripcion }}</p>
+                <p class="mt-1 text-body-sm">
+                  {{ conv.organo_convocante }} ·
+                  {{ conv.presupuesto_total | number: '1.0-0' }} € · Fin:
+                  {{
+                    conv.fin_solicitud
+                      ? (conv.fin_solicitud | date: 'dd/MM/yyyy')
+                      : 'Sin fecha publicada'
+                  }}
+                </p>
+                <div class="mt-1 flex flex-wrap items-center gap-3 text-body-sm">
+                  <span *ngIf="conv.regla_asignacion">
+                    Criterio: {{ etiquetaRegla(conv.regla_asignacion) }}
+                  </span>
+                  <a
+                    *ngIf="conv.url_bases"
+                    [href]="conv.url_bases"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="font-semibold text-primary underline"
+                    >Ver bases</a
+                  >
+                </div>
               </li>
             </ul>
             <a
@@ -197,9 +215,17 @@ import { SemaforoLabelPipe } from '../../shared/pipes/semaforo-label.pipe';
           </section>
         </div>
         <section class="card mt-4 rounded-xl p-5 sm:p-6">
-          <h2 class="mb-4 border-b border-surface-container pb-3 text-headline-sm font-semibold">
-            Demografía
-          </h2>
+          <div class="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-surface-container pb-3">
+            <h2 class="text-headline-sm font-semibold">
+              Demografía
+            </h2>
+            <a
+              class="text-body-sm font-semibold text-primary underline"
+              routerLink="/analitica"
+              [queryParams]="{ municipios: m.codigo_ine }"
+              >Comparar en Analítica</a
+            >
+          </div>
           <p class="text-body-md text-on-surface-variant">
             Inercia: {{ m.inercia_demografica }} · Preserva masa crítica:
             {{ m.preserva_masa_critica ? 'Sí' : 'No' }}
@@ -213,6 +239,9 @@ import { SemaforoLabelPipe } from '../../shared/pipes/semaforo-label.pipe';
               {{ d.poblacion_actual }} · Variación:
               {{ d.variacion_10a_pct === null ? 'Sin datos' : d.variacion_10a_pct + '%' }}
             </p>
+            <div *ngIf="d.serie_anual.length" class="relative mt-4 h-64 w-full">
+              <canvas #demoChart aria-label="Evolución poblacional del municipio"></canvas>
+            </div>
             <div class="mt-4 overflow-x-auto rounded-lg border border-surface-container">
               <table class="w-full min-w-[34rem] text-left text-body-sm">
                 <thead>
@@ -247,12 +276,14 @@ import { SemaforoLabelPipe } from '../../shared/pipes/semaforo-label.pipe';
     </div>
   `,
 })
-export class MunicipioDetailComponent implements OnInit {
+export class MunicipioDetailComponent implements OnInit, OnDestroy {
+  @ViewChild('demoChart') demoChartRef?: ElementRef<HTMLCanvasElement>;
   municipio: MunicipioDetail | null = null;
   demografia: Demografia | null = null;
   loading = true;
   error: string | null = null;
   demografiaError: string | null = null;
+  private demoChart?: Chart;
   private readonly destroyRef = inject(DestroyRef);
   private readonly cdr = inject(ChangeDetectorRef);
 
@@ -321,9 +352,53 @@ export class MunicipioDetailComponent implements OnInit {
       });
   }
 
+  ngOnDestroy(): void {
+    this.demoChart?.destroy();
+  }
+
+  etiquetaRegla(regla: string): string {
+    const etiquetas: Record<string, string> = {
+      organo_local: 'Ayuda local',
+      umbral_poblacion: 'Por tamaño de población',
+      region_completa: 'Ayuda regional',
+    };
+    return etiquetas[regla] ?? regla;
+  }
+
+  private renderDemoChart(): void {
+    this.demoChart?.destroy();
+    this.demoChart = undefined;
+    if (!this.demografia?.serie_anual.length) return;
+    const ctx = this.demoChartRef?.nativeElement.getContext('2d');
+    if (!ctx) return;
+    this.demoChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: this.demografia.serie_anual.map((p) => String(p.anio)),
+        datasets: [
+          {
+            label: `Población (${this.demografia.nombre})`,
+            data: this.demografia.serie_anual.map((p) => p.poblacion),
+            borderColor: '#25834c',
+            backgroundColor: 'rgba(37, 131, 76, 0.15)',
+            fill: true,
+            tension: 0.25,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+      },
+    });
+  }
+
   private loadDemografia(codigo: string): void {
     this.demografia = null;
     this.demografiaError = null;
+    this.demoChart?.destroy();
+    this.demoChart = undefined;
     this.cdr.markForCheck();
     this.municipioService
       .getDemografia(codigo)
@@ -332,7 +407,8 @@ export class MunicipioDetailComponent implements OnInit {
         next: (data) => {
           if (this.municipio?.codigo_ine === codigo) {
             this.demografia = data;
-            this.cdr.markForCheck();
+            this.cdr.detectChanges();
+            this.renderDemoChart();
           }
         },
         error: (err) => {

@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, DestroyRef, ElementRef, inject, Input, OnChanges, OnDestroy, ViewChild } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, DestroyRef, ElementRef, inject, Input, OnChanges, OnDestroy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import * as L from 'leaflet';
@@ -53,6 +53,7 @@ export class TerritorioMapComponent implements AfterViewInit, OnChanges, OnDestr
   private centros?: L.LayerGroup;
   private centrosSubscription?: import('rxjs').Subscription;
   private readonly destroyRef = inject(DestroyRef);
+  private readonly cdr = inject(ChangeDetectorRef);
   centrosError: string | null = null;
   constructor(private router: Router, private service: MunicipioService) {}
 
@@ -73,6 +74,7 @@ export class TerritorioMapComponent implements AfterViewInit, OnChanges, OnDestr
     this.centrosSubscription?.unsubscribe();
     this.centros?.clearLayers();
     this.centrosError = null;
+    this.cdr.markForCheck();
     if (!(event.target as HTMLInputElement).checked) return;
     this.centrosSubscription = this.service.getCentrosSanitarios().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: centros => {
@@ -82,8 +84,13 @@ export class TerritorioMapComponent implements AfterViewInit, OnChanges, OnDestr
           L.circleMarker([centro.latitud, centro.longitud], { radius: 5, color: centro.tiene_urgencias ? '#005eb8' : '#7395b8', fillOpacity: 0.9 })
             .bindPopup(text).addTo(this.centros!);
         }
+        this.cdr.markForCheck();
       },
-      error: err => { console.error('Error al cargar centros sanitarios:', err); this.centrosError = 'No se pudieron cargar los centros sanitarios.'; }
+      error: err => {
+        console.error('Error al cargar centros sanitarios:', err);
+        this.centrosError = 'No se pudieron cargar los centros sanitarios.';
+        this.cdr.markForCheck();
+      }
     });
   }
 

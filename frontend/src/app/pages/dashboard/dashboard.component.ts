@@ -1,8 +1,9 @@
 import { Component, OnInit, OnDestroy, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import { FiltrosMunicipios, MunicipioService } from '../../core/services/municipio.service';
+import { FiltrosMunicipios, MunicipioService, Pesos } from '../../core/services/municipio.service';
 import { Municipio, KPISummary, Health } from '../../core/models/municipio.model';
 import { KpiCardComponent } from '../../shared/components/kpi-card/kpi-card.component';
 import { TerritorioMapComponent } from '../../shared/components/territorio-map/territorio-map.component';
@@ -25,6 +26,7 @@ import { SemaforoLabelPipe } from '../../shared/pipes/semaforo-label.pipe';
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     KpiCardComponent,
     TerritorioMapComponent,
     RangoMunicipalComponent,
@@ -42,6 +44,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
   health: Health | null = null;
   healthError = false;
   activeFilter: 'all' | 'wlc_fibra' | 'ayudas' = 'all';
+  showWeights = false;
+  customWeightsActive = false;
+  weights: Required<Pick<Pesos, 'w_carretera' | 'w_sanidad' | 'w_conectividad' | 'w_hidrico' | 'w_demografia'>> = {
+    w_carretera: 0.25,
+    w_sanidad: 0.2,
+    w_conectividad: 0.2,
+    w_hidrico: 0.15,
+    w_demografia: 0.2,
+  };
 
   private destroy$ = new Subject<void>();
 
@@ -69,9 +80,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   loadDashboardData(filters: FiltrosMunicipios = {}): void {
     this.isLoading = true;
     this.error = null;
+    const effectiveFilters: FiltrosMunicipios = this.customWeightsActive
+      ? { ...filters, ...this.weights }
+      : filters;
 
     this.municipioService
-      .getMunicipios(filters)
+      .getMunicipios(effectiveFilters)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (municipios: Municipio[]) => {
@@ -92,6 +106,29 @@ export class DashboardComponent implements OnInit, OnDestroy {
   setFilter(filter: 'all' | 'wlc_fibra' | 'ayudas'): void {
     this.activeFilter = filter;
     this.cdr.markForCheck();
+  }
+
+  applyWeights(): void {
+    this.customWeightsActive = true;
+    this.loadDashboardData(this.getActiveFilterParams());
+  }
+
+  resetWeights(): void {
+    this.weights = {
+      w_carretera: 0.25,
+      w_sanidad: 0.2,
+      w_conectividad: 0.2,
+      w_hidrico: 0.15,
+      w_demografia: 0.2,
+    };
+    this.customWeightsActive = false;
+    this.loadDashboardData(this.getActiveFilterParams());
+  }
+
+  private getActiveFilterParams(): FiltrosMunicipios {
+    if (this.activeFilter === 'wlc_fibra') return { min_wlc: 75, requiere_fibra: true };
+    if (this.activeFilter === 'ayudas') return { con_ayuda_abierta: true };
+    return {};
   }
 
   private calculateKPIs(municipios: Municipio[]): KPISummary {

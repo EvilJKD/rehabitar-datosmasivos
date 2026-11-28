@@ -1,6 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 
 @Component({
   selector: 'app-navbar',
@@ -24,29 +24,26 @@ import { RouterModule } from '@angular/router';
         </a>
 
         <!-- Navigation -->
-        <nav class="flex items-center gap-xs">
+        <nav class="flex items-center gap-xs" aria-label="Navegación principal">
           <a
             routerLink="/dashboard"
-            routerLinkActive="active"
+            routerLinkActive="bg-surface-container-low text-primary-container font-semibold"
             [routerLinkActiveOptions]="{ exact: true }"
-            class="px-md py-sm transition-colors rounded-lg"
-            [ngClass]="
-              isActive('/dashboard')
-                ? 'bg-surface-container-low text-primary-container font-semibold'
-                : 'font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'
-            "
+            class="px-md py-sm transition-colors rounded-lg font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface"
           >
             Municipios
           </a>
           <a
+            routerLink="/analitica"
+            routerLinkActive="bg-surface-container-low text-primary-container font-semibold"
+            class="px-md py-sm transition-colors rounded-lg font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface"
+          >
+            Analítica
+          </a>
+          <a
             routerLink="/convocatorias"
-            routerLinkActive="active"
+            routerLinkActive="bg-surface-container-low text-primary-container font-semibold"
             class="px-md py-sm rounded-lg font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors"
-            [ngClass]="
-              isActive('/convocatorias')
-                ? 'bg-surface-container-low text-primary-container font-semibold'
-                : ''
-            "
           >
             Convocatorias
           </a>
@@ -57,7 +54,10 @@ import { RouterModule } from '@angular/router';
   styles: [],
 })
 export class NavbarComponent {
+  private readonly router = inject(Router);
+
   isActive(route: string): boolean {
-    return window.location.pathname === route || window.location.pathname.endsWith(route);
+    const current = this.router.url.split('?')[0];
+    return current === route || current.endsWith(route);
   }
 }
